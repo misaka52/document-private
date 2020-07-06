@@ -68,11 +68,11 @@ git commit --amend		修改上一次的提交信息
 
    回滚至指定节点
 
-   --soft			仅重置HEAD指针
+   --soft			仅重置git仓库内容。修改已add，待提交。
 
-   --mixed		重置HEAD、暂存区（默认选项）
+   --mixed		（默认选项）重置git仓库内容、暂存区。工作区已修改未提交到暂存区
 
-   --hard			重置HEAD、暂存区、工作区
+   --hard		  重置git仓库内容、工作区。修改代码丢失
 
    当回滚至之前某节点时，若想要提交至远程仓库，需git push -f 强制推送
 
@@ -98,7 +98,7 @@ git stath 		暂存未提交区域
 
 git stash apply [\<stash>] 		恢复指定stash(不填\<stash>默认选择栈顶元素，stash@[0])
 
-git stath apply [\<stash>]		删除指定stash（不填\<stash>默认选择栈顶元素，stash@[0])
+git stath drop [\<stash>]		删除指定stash（不填\<stash>默认选择栈顶元素，stash@[0])
 
 git stash pop [\<stash>]		恢复并删除指定stash（不填\<stash>默认选择栈顶元素，stash@[0])
 
@@ -166,7 +166,7 @@ git remote set-url \<name> \<newurl>		修改数据源地址
 
 
 
-### 4、分支，合并，冲突
+### 4、分支，合并，冲突，变基
 
 **branch**
 
@@ -213,6 +213,22 @@ git branch -D \<branch>		强制删除分支
 ps：idea手动解决冲突，对于修改相同行数的文件，先用魔法棒解决简单冲突，再手动解决无法自动解决的冲突
 
   <img src="D:/yuanshancheng3/Documents/JD/office_dongdong/yuanshancheng/Image/1577435159400_src" alt="img" style="zoom: 200%;" /> 
+
+**变基**
+
+参考：[https://git-scm.com/book/zh/v2/Git-%E5%88%86%E6%94%AF-%E5%8F%98%E5%9F%BA](https://git-scm.com/book/zh/v2/Git-分支-变基)
+
+修改提交历史，将分叉的节点（commit）整合到一条直线上，使其更加清晰直观
+
+git rebase实现
+
+注：网上对变基有各种争议
+
+变基：优点：使提交历史更清晰直观；缺：修改历史，失真，本身是种“亵渎”，并且可能出现问题（修改提交历史，提交到远程仓库，影响其他人的开发）
+
+只对尚未推送或已经分享给别人的本地修改执行变基操作
+
+
 
 ### 5、其他
 
