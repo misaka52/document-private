@@ -108,7 +108,7 @@ Apache Maven是一个软件管理和综合工具，基于项目对象模型（PO
   <server>
      <id>snapshots</id>
      <username>username</username>
-     <password>password</password>  /*jd私服，填写API key即可
+     <password>password</password>  <!--jd私服，填写API key即可-->
   </server>
 </servers>
 ```
@@ -132,6 +132,36 @@ mvn deploy:deploy-file -DgroupId=testArty -DartifactId=testArty-artyjava -Dversi
   
 /**注意：DrepositoryId 必须与setting中server模块的ID一致，否则不能上传
 ```
+
+
+
+上传的代码包只是编译后的class文件，不是源代码，可以额外打包源代码上传
+
+**maven指令打包时添加源码**
+
+mvn clean source:jar deploy -pl groupId:artifactId
+
+**项目中增加插件以保证打包时加入源码**
+
+```xml
+<plugin>
+    <artifactId>maven-source-plugin</artifactId>
+    <version>3.0.1</version>
+    <configuration>
+        <attach>true</attach>
+    </configuration>
+    <executions>
+        <execution>
+            <phase>compile</phase>
+            <goals>
+                <goal>jar</goal>
+            </goals>
+        </execution>
+    </executions>
+</plugin>
+```
+
+
 
 
 
@@ -213,7 +243,8 @@ mvn deploy:deploy-file -DgroupId=testArty -DartifactId=testArty-artyjava -Dversi
 >
 > system：系统本地jar包，需要提供外在相应的元素，通过systemPath获得
 >
-> optional：当自身被依赖时，标注依赖是否被传递。用于连续时依赖
+
+​	**optional** 当自身被依赖时，标注依赖是否被传递。用于连续时依赖
 
 ​	**systemPath** 与system对应
 
@@ -223,7 +254,7 @@ mvn deploy:deploy-file -DgroupId=testArty -DartifactId=testArty-artyjava -Dversi
 
 **reporting** 生成报表插的规范，用于 mvn site
 
-**\*dependencyManagement** 所有子项目的默认依赖信息。这部分的依赖信息不会立即解析，而是当子项目中声明一个依赖没有声明除groupId和artifactId之外的信息，子项目就会到着来匹配其它信息，如版本号
+**dependencyManagement** 所有子项目的默认依赖信息。这部分的依赖信息不会立即解析，而是当子项目中声明一个依赖没有声明除groupId和artifactId之外的信息，子项目就会到着来匹配其它信息，如版本号
 
 ​	**dependencies** 同上
 
@@ -249,7 +280,7 @@ mvn deploy:deploy-file -DgroupId=testArty -DartifactId=testArty-artyjava -Dversi
 
 ## 依赖管理
 
-传递依赖：B依赖A，C依赖B，C就依赖。可以利用exclusion排除传递依赖，或optional设置可选传递依赖
+传递依赖：B依赖A，C依赖B，C就依赖A。可以利用exclusion排除传递依赖，或optional设置可选传递依赖
 
 就近原则，两个依赖版本相同深度下，第一个声明的依赖会被使用。不同深度下依赖深度较小的
 
