@@ -286,6 +286,10 @@ mvn clean source:jar deploy -pl groupId:artifactId
 
 
 
+- 依赖包查找：mvn dependency:tree -Dverbose -Dincludes=
+
+
+
 #### 参考
 
 1. https://www.runoob.com/maven
