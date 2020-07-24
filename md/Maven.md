@@ -391,9 +391,13 @@ mvn clean source:jar deploy -pl groupId:artifactId
 
 
 
+<<<<<<< HEAD
 ## 指令
 
 - 查询mavenjar包依赖：mvn dependency:tree -Dverbose -Dincludes=commons-collections:
+=======
+- 依赖包查找：mvn dependency:tree -Dverbose -Dincludes=
+>>>>>>> 1a1dc45930a9e840e4641c3aa7d48ad822f40f86
 
 
 
