@@ -18,7 +18,7 @@
 ### 任务执行
 
 ```java
-		/**
+	/**
      *  
      * @param jobId 任务 id
      * @param triggerType 触发类型。MANUAL(手动执行)、CRON(corn表达式定时执行)、RETRY(重试)、PARENT(父任务带动子任务执行)、API(接口执行)
@@ -31,8 +31,16 @@ JobTriggerPoolHelper.trigger(int jobId, TriggerTypeEnum triggerType, int failRet
 ```
 
 - 执行任务，将任务添加到 指定机器任务运行队列。
+
 - 一个线程一直扫描任务运行队列，执行任务。并将调用结果添加到回调队列中
+
 - 一个线程一直扫描回调队列，将执行结果回调给服务端。若有子任务，则执行子任务。并将结果保存到日志中
+
+  ### 任务调度
+
+- 根据路由规则，循环时间，指定下次调度的时间。但是接受调度的客户端仅仅把调度请求放入队列中，循环扫描队列执行任务，无中断等待时间，多客户端堆积时触发重复调度问题
+
+
 
 ### 执行器 jobgroup
 

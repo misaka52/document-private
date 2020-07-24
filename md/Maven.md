@@ -20,11 +20,15 @@ Apache Maven是一个软件管理和综合工具，基于项目对象模型（PO
 
 私服和镜像可理解为远程仓库
 
->依赖包寻找顺序存疑，网上找到两种说法，待验证：
+>依赖包寻找顺序：本地仓库->远程仓库(repository， setting.xml配置 > pom.xml > parent pom.xml) >镜像(mirror)->中央仓库(central)
 >
->依赖包寻找顺序：本地仓库>maven中央仓库>远程仓
+>maven的配置文件settings.xml，存在多个。
 >
->依赖包寻找顺序：本地仓库->私服(profile)->远程仓库(repository, 项目pom中配置)和镜像(mirror)->中央仓库(central)
+>MAVEN_HOME/conf/settings.xml，是maven的全局配置文件；
+>
+>HOME_DIR/.m2/settings.xml，家目录maven仓库下的配置文件，是用户级配置文件
+>
+>优先级： 用户级 > 全局
 
 > 一般国内网络从Maven中央仓库下载包比较慢，推荐配置阿里镜像仓库，需在maven settings.xml中配置
 >
@@ -37,19 +41,120 @@ Apache Maven是一个软件管理和综合工具，基于项目对象模型（PO
 
 
 
-> maven的配置文件settings.xml，存在多个。
->
-> MAVEN_HOME/conf/settings.xml，是maven的全局配置文件；
->
-> HOME_DIR/.m2/settings.xml，家目录maven仓库下的配置文件，是用户级配置文件
->
-> 优先级： 用户级 > 全局
-
 ### settings.xml
+
+**localRepository**  本地仓库路径配置，默认${user.home}/.m2/repository
+
+**interactiveMode**  maven是否需要输入，默认true
+
+**offline** maven是否在离线状态下工作
+
+**Servers**
+
+```xml
+<!--配置仓库服务端的一些设置。一些设置如安全证书不应该和pom.xml一起分发。比如仓库验证的账号密码 -->
+  <servers>
+    <!--服务器元素包含配置服务器时需要的信息 -->
+    <server>
+      <!--这是server的id（注意不是用户登陆的id），该id与distributionManagement中repository元素的id相匹配。 -->
+      <id>server001</id>
+      <!--鉴权用户名。鉴权用户名和鉴权密码表示服务器认证所需要的登录名和密码。 -->
+      <username>my_login</username>
+      <!--鉴权密码 。鉴权用户名和鉴权密码表示服务器认证所需要的登录名和密码。密码加密功能已被添加到2.1.0 +。详情请访问密码加密页面 -->
+      <password>my_password</password>
+      <!--鉴权时使用的私钥位置。和前两个元素类似，私钥位置和私钥密码指定了一个私钥的路径（默认是${user.home}/.ssh/id_dsa）以及如果需要的话，一个密语。将来passphrase和password元素可能会被提取到外部，但目前它们必须在settings.xml文件以纯文本的形式声明。 -->
+      <privateKey>${usr.home}/.ssh/id_dsa</privateKey>
+      <!--鉴权时使用的私钥密码。 -->
+      <passphrase>some_passphrase</passphrase>
+      <!--文件被创建时的权限。如果在部署的时候会创建一个仓库文件或者目录，这时候就可以使用权限（permission）。这两个元素合法的值是一个三位数字，其对应了unix文件系统的权限，如664，或者775。 -->
+      <filePermissions>664</filePermissions>
+      <!--目录被创建时的权限。 -->
+      <directoryPermissions>775</directoryPermissions>
+    </server>
+  </servers>
+```
+
+**Mirrors**
+
+```xml
+<!-- 为仓库列表配置的镜像地址 -->
+<mirrors>
+     <!-- 该镜像的唯一标识符。id用来区分不同的mirror元素。 -->
+      <id>planetmirror.com</id>
+      <!-- 镜像名称 -->
+      <name>PlanetMirror Australia</name>
+      <!-- 该镜像的URL。构建系统会优先考虑使用该URL，而非使用默认的服务器URL。 -->
+      <url>http://downloads.planetmirror.com/pub/maven2</url>
+      <!-- 该镜像的服务器的id。例如，如果我们要设置了一个Maven中央仓库（http://repo.maven.apache.org/maven2/）的镜像，就需要将该元素设置成central。这必须和中央仓库的id central完全一致。 -->
+      <mirrorOf>central</mirrorOf>
+</mirrors>
+```
 
 **proxies** 代理配置
 
-**localRepository**  本地仓库路径配置
+```xml
+<proxies>
+    <!--代理元素包含配置代理时需要的信息 -->
+    <proxy>
+      <!--代理的唯一定义符，用来区分不同的代理元素。 -->
+      <id>myproxy</id>
+      <!--该代理是否是激活的那个。true则激活代理。当我们声明了一组代理，而某个时候只需要激活一个代理的时候，该元素就可以派上用处。 -->
+      <active>true</active>
+      <!--代理的协议。 协议://主机名:端口，分隔成离散的元素以方便配置。 -->
+      <protocol>http</protocol>
+      <!--代理的主机名。协议://主机名:端口，分隔成离散的元素以方便配置。 -->
+      <host>proxy.somewhere.com</host>
+      <!--代理的端口。协议://主机名:端口，分隔成离散的元素以方便配置。 -->
+      <port>8080</port>
+      <!--代理的用户名，用户名和密码表示代理服务器认证的登录名和密码。 -->
+      <username>proxyuser</username>
+      <!--代理的密码，用户名和密码表示代理服务器认证的登录名和密码。 -->
+      <password>somepassword</password>
+      <!--不该被代理的主机名列表。该列表的分隔符由代理服务器指定；例子中使用了竖线分隔符，使用逗号分隔也很常见。 -->
+      <nonProxyHosts>*.google.com|ibiblio.org</nonProxyHosts>
+    </proxy>
+  </proxies>
+```
+
+**Repositories**
+
+```xml
+<repositories>
+  <!--包含需要连接到远程仓库的信息 -->
+  <repository>
+    <!--远程仓库唯一标识 -->
+    <id>codehausSnapshots</id>
+    <!--远程仓库名称 -->
+    <name>Codehaus Snapshots</name>
+    <!--如何处理远程仓库里发布版本的下载 -->
+    <releases>
+      <!--true或者false表示该仓库是否为下载某种类型构件（发布版，快照版）开启。 -->
+      <enabled>false</enabled>
+      <!--该元素指定更新发生的频率。Maven会比较本地POM和远程POM的时间戳。这里的选项是：always（一直），daily（默认，每日），interval：X（这里X是以分钟为单位的时间间隔），或者never（从不）。 -->
+       <!-- 经实验，release包不管选择什么都是never，一旦下载下来就不会更新。snapshot可配置四种 -->
+      <updatePolicy>always</updatePolicy>
+      <!--当Maven验证构件校验文件失败时该怎么做-ignore（忽略），fail（失败），或者warn（警告）。 -->
+      <checksumPolicy>warn</checksumPolicy>
+    </releases>
+    <!--如何处理远程仓库里快照版本的下载。有了releases和snapshots这两组配置，POM就可以在每个单独的仓库中，为每种类型的构件采取不同的策略。例如，可能有人会决定只为开发目的开启对快照版本下载的支持。参见repositories/repository/releases元素 -->
+    <snapshots>
+      <enabled />
+      <updatePolicy />
+      <checksumPolicy />
+    </snapshots>
+    <!--远程仓库URL，按protocol://hostname/path形式 -->
+    <url>http://snapshots.maven.codehaus.org/maven2</url>
+    <!--用于定位和排序构件的仓库布局类型-可以是default（默认）或者legacy（遗留）。Maven 2为其仓库提供了一个默认的布局；然而，Maven 1.x有一种不同的布局。我们可以使用该元素指定布局是default（默认）还是legacy（遗留）。 -->
+    <layout>default</layout>
+  </repository>
+</repositories>
+```
+
+**pluginRepositories** 发现插件的远程仓库列表。和repository类似，只是repository是管理jar包的仓库，pluginRepository是管理插件的仓库
+
+**ActiveProfiles** 选择激活的profile
+
+
 
 
 
@@ -286,7 +391,14 @@ mvn clean source:jar deploy -pl groupId:artifactId
 
 
 
+## 指令
+
+- 查询mavenjar包依赖：mvn dependency:tree -Dverbose -Dincludes=commons-collections:
+
+
+
 #### 参考
 
 1. https://www.runoob.com/maven
 2. https://maven.apache.org/
+3. https://www.cnblogs.com/jingmoxukong/p/6050172.html
