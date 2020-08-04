@@ -31,7 +31,7 @@
 #### 消息分类
 - 顺序消息
 
-  - 全局顺序消息，对于某个topic下的所有消息都要保证顺序。严格要找FIFO的顺序进行发布和消费。性能要求不高
+  - 全局顺序消息，对于某个topic下的所有消息都要保证顺序。严格按照FIFO的顺序进行发布和消费。性能要求不高
   - 分区顺序消息，对于一个指定topic，根据sharding key进行区块分区，同一个分区严格保证顺序。性能高
 
 - 广播消息，发送的消息所有的订阅者都能收到。consumer.setMessageModel(MessageModel.BROADCASTING)
