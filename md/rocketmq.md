@@ -1,10 +1,8 @@
 ## rocketmq
 
-### 背景
+### 1 概念
 
 阿里双十一电商级消息中间件
-
-### 概念
 
 - topic，消息主体，逻辑概念，在发布/订阅模式下，生产者和消费者消息传递的类别或标识。一个消息对应多个queue。每个broker可以存储多个topic的消息，每个topic的消息也可以分片存储在不同的broker
 - tag，作为消息的第二级类型（topic是第一级）。可用于指定同一个topic下不同消息分组订阅
@@ -84,7 +82,7 @@ consumer.subscribe("TopicTest", MessageSelector.bySql("a between 0 and 3");
 
 ![img](./imgs/rocketmq_1.png)
 
-- 同步刷盘，只有在消息真正持久化至磁盘后RocketMq的broker端才会真正返回给producer端一个成功的ACK响应。保障了消息可靠性，但影响一定性能
+- 同步刷盘，只有在消息真正持久化至磁盘后RocketMq的broker端才会真正返回给producer端一个成功的ACK响应。保障了消息可靠性，但影响一定性能	
 - 异步刷盘，能否充分利用OS的PageCache的优势，只要消息写入PageCache即可成功返回ACK至producer端。消息刷盘采用后台线程提交的方式进行，降低了读写延迟，提高了mq的性能和吞吐量
 
 #### 通信机制
@@ -107,5 +105,71 @@ consumer.subscribe("TopicTest", MessageSelector.bySql("a between 0 and 3");
 
 返回结果，只要不跑出异常，就表示发送成功，得到结果状态
 
-- SEND_OK，消息发送成功。发送成功
+- SEND_OK，消息发送成功。发送成功并不确保时可靠的，要想消息不丢失，还需要开启同步master服务器或同步刷盘
+- FLUSH_DISK_TIMEOUT，服务器同步成功但服务器刷盘超时，消息已进入服务器消息队列，只要服务器不宕机，消息就不会丢失。同步刷盘才可能发生这种情况
+- FLUSH_SLAVE_TIMEOUT，消息发送成功但同步到slave超时，消息已进入服务器消息队列，只要服务器不宕机，消息就不会丢失。如果服务器的角色是同步master，即SYNC_MASTER （默认异步同步服务器即ASYNC_MASTER），并且从broker未在同步刷盘时间内（默认5秒）内完成与主服务器 的同步，则返回改状态
+- SLAVE_NOT_AVAILABLE，消息发送成功，但slave不可用。master同步到slave时出错
+
+producer发送消息失败的处理
+
+- 至多重试2次（同步为2次，异步为0次）
+- 如果发送失败，则轮转到下一个broker。该方法的总耗时时间不超过sendMsgTimeout（默认10s）
+- 如果本身向broker发送消息超时，不会重试
+
+#### 事务消息
+
+提供commit和rollback，消息只要在commit之后才能被消费者发现并消息（实则一阶段提交时修改了消息topic，消费者接收不到消息）
+
+
+
+### 2 消费者
+
+#### 2.1 消费过程幂等
+
+rocketmq无法避免消息重复，需要在消费时进行幂等操作
+
+#### 2.2 消费速度慢的处理
+
+**提高消费并发度**
+
+- 同一个consumerGroup下，增加consumer实例数量（超过订阅队列数的无效）
+- 对同一个cousumer，增加线程数量，通过consumerThreadMin和consumerThreadMax控制
+
+**批量消费方式**
+
+批量消费消息，通过consumer的consumeMessageBatchMaxSize消息消费数量，默认1。与生产者是否发送批量消息无关
+
+**跳过非重要消息（可计算消息堆积量）、优化消费流程**
+
+#### 2.3 消费者类型
+
+**pushConsumer**
+
+broker主动向consumer推送消息，consumer注册一个listener，一有消息推过来就进行消费。缺点是当消费速度小于推送消息的速度，会造成消息在broker的积压。一般使用的都是改种类型消费者
+
+**pullConsumer**
+
+consumer主动向broker拉取消息，比如自己控制轮询去向拉取型消费者中获取消息
+
+
+
+
+
+### 疑问
+
+1. broker的角色只有SYNC_MASTER、ASYNC_MASTER和SLAVE，slave会直接接收消息吗，接收后怎么向master及其他slave同步
+
+2. pull消费和push消费者区别？正常配置的消费时哪种类型？
+
+   > 如2.3。一般使用pushConsumer
+
+   
+
+
+
+## 参考
+
+1. https://github.com/apache/rocketmq/tree/master/docs/cn 官方中文文档
+
+
 
