@@ -160,9 +160,9 @@ git remote set-url \<name> \<newurl>		修改数据源地址
 
 ​	将本地仓库代码推送到远程仓库
 
-​	git push \<remote> \<本地分支> : \<远程仓库分支>	若远程仓库不存在该分支，则创建新分支；若\<本地分支>不填，相当于推送空分支至远程空库，强制删除分支
+​	git push \<remote> \<本地分支> : \<远程仓库分支>	若远程仓库分支不存在该分支，则创建新分支；若\<本地分支>不填，相当于推送空分支至远程空库，强制删除分支
 
-​	git push -u \<remote> \<branch> 		push并设置remote，常用于push项目到远程空项目上
+​	git push -u \<remote> \<branch> 		push并设置默认remote，常用于push项目到远程空项目上
 
 
 
