@@ -90,6 +90,13 @@ Apache Maven是一个软件管理和综合工具，基于项目对象模型（PO
 </mirrors>
 ```
 
+mirrorOf，限定仓库
+
+- \* ：表示替换所有的仓库，所有的jar都从该镜像中拉取
+- repo1, repo2: 限定repo1或repo2
+- \*, !repo: 覆盖出repo仓库外的所有仓库 
+- external:\* = everything not on localhost and not file based.(理解：所有不存在本地的包或文件都从镜像中拉取)
+
 **proxies** 代理配置
 
 ```xml
@@ -391,13 +398,9 @@ mvn clean source:jar deploy -pl groupId:artifactId
 
 
 
-<<<<<<< HEAD
 ## 指令
 
-- 查询mavenjar包依赖：mvn dependency:tree -Dverbose -Dincludes=commons-collections:
-=======
-- 依赖包查找：mvn dependency:tree -Dverbose -Dincludes=
->>>>>>> 1a1dc45930a9e840e4641c3aa7d48ad822f40f86
+- maven依赖包查找：mvn dependency:tree -Dverbose -Dincludes=
 
 
 
