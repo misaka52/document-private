@@ -214,27 +214,6 @@ Handler 是继DispatcherServlet前端控制器的后端控制器，在Dispatcher
 </beans>
 ```
 
-### 配置说明
-
-Mvc:annotation-drivern
-
-```
-- ContentNegotiationManagerFactoryBean
-- RequestMappingHandlerMapping(重要)
-- ConfigurableWebBindingInitializer
-- RequestMappingHandlerAdapter(重要)
-- CompositeUriComponentsContributorFactoryBean
-- ConversionServiceExposingInterceptor
-- MappedInterceptor
-- ExceptionHandlerExceptionResolver
-- ResponseStatusExceptionResolver
-- DefaultHandlerExceptionResolver
-- BeanNameUrlHandlerMapping
-- HttpRequestHandlerAdapter
-- SimpleControllerHandlerAdapter
-- HandlerMappingIntrospector
-```
-
 ### 编码部分
 
 #### Controller
@@ -251,7 +230,7 @@ Mvc:annotation-drivern
 
 ## 返回值处理
 
-### 不适用注解
+### 不使用注解
 
 #### ModelAndView
 

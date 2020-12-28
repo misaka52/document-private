@@ -54,13 +54,13 @@ Spring是一个分层的Java SE/EE full-stack 轻量级开源框架。官网地�
 - Destroy-method：类销毁方法
 - scope：指定对象的作用范围
   - singleton：默认。单例对象
-  - prototype：多例。每次访问对象时都会新建对象
+  - prototype：多例。每次获取bean的时候都会新建对象
   - request：将Spring容器创建的bean放入request中
   - session：将Spring容器创建的bean放入session域中
 
 ##### bean初始化的三种方式
 
-1. 使用默认无参构造器（重点）：直接配置<bean>
+1. 使用默认无参构造器（重点）：直接配置<bean\>
 2. 静态工厂。配置一个静态工厂，提供创建对象的静态方法
 3. 实例工厂。配置实例工厂
 
@@ -93,10 +93,9 @@ constructor-arg标签属性
 - 手动装配方式（xml）
   - 配置bean标签的property子标签
   - 配置bean中指定的setter方法
-- 自动状态方式
+- 自动装配方式
   - @Autowired
-    - 按照类型查找实例。注入的类型Spring只能有一个实例。由
-    - Autowired由AutowiredAnnotationBeanPostProcessor类实现
+    - 按照类型查找实例。注入的类型Spring只能有一个实例。由Autowired由AutowiredAnnotationBeanPostProcessor类实现
     - 默认情况下要求bean必须存在，不可为null。若允许为null可设置属性required属性为false
     - 可结合@Qualifier来实现根据实例名称查询
     - spring自带注解
@@ -109,7 +108,7 @@ constructor-arg标签属性
 
 **3. 依赖注入不同类型的属性**
 
-简单类型（value）：8中基本类型和String
+简单类型（value）：8种基本类型和String
 
 引用类型（ref）：引用类型，用来注入引用。引用bean id
 
@@ -166,7 +165,7 @@ constructor-arg标签属性
 > ```
 >
 > 然后组增加bean扫描配置：\<context:component-scan
-> 		base-package="com.kkb.spring.aop"></context:component-scan\>
+> 		base-package="com.kkb.spring.aop">/context:component-scan\>
 
 - step2：在类上添加注解@Component，或者衍生注解@Controller、@Service、@Repository
 
@@ -176,7 +175,7 @@ constructor-arg标签属性
 
 将该类作为一个Spring管理的bean，相当于在xml中配置一个bean。
 
-value属性：指定bean的id，未指定时以类的小驼峰写法名作为bean id
+value属性：指定bean的id，未指定value时以小驼峰写法名作为bean id
 
 ##### Controller&Service&Repository
 
@@ -243,7 +242,7 @@ private Map<String, String> map;
 
 相当于xml中的context:property-placeholder标签
 
-属性value[]:指定properties文件路径，若在类路径下，需要协商classpath
+属性value[]:指定properties文件路径，若在类路径下，需要写上classpath
 
 ```java
 @Configuration
@@ -260,7 +259,7 @@ public class MysqlConfiguration {
 
 #### @Import
 
-相当xml中的import标签，引入其他配置属性
+相当xml中的import标签，引入其他配置文件
 
 ```java
 @Configuration
@@ -293,7 +292,7 @@ ApplicationContext context = new AnnotationConfigApplicationContext(JdbcSource.c
 
 #### 概念
 
-aop，Aspect Oriented Programming，面向切面编程。通过预编译和运行期动态代理实现功能的统一维护的技术
+aop，Aspect Oriented Programming，面向切面编程。通过预编译和运行期动态代理实现功能统一维护的技术
 
 AOP是一种编程范式，隶属于软工范畴。Spring将aop思想引入
 
@@ -488,7 +487,7 @@ juit程序不能识别spring，无法创建Spring容器。可通过@RunWith注�
 
 1. Spring的编程式事务管理，手动编写代码实现事务管理，不推荐使用
    1. 提供模板类TransactionTemplate，配置执行
-2. Spring声明式事务（底层蝉蛹AOP的技术），通过配置实现@Transactional
+2. Spring声明式事务（底层采用AOP的技术），通过配置实现@Transactional
 
 #### 事务管理之XML方式
 
@@ -555,3 +554,4 @@ juit程序不能识别spring，无法创建Spring容器。可通过@RunWith注�
 1. 类或方法上添加注解@Transcational
 
 2. 开启事务注解：spring ioc容器管理bean上添加@EnableTransactionManagent
+
