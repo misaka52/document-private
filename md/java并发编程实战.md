@@ -60,9 +60,9 @@ Fail-fast 及时失败，当发现容器在迭代过程中被修改，则抛出�
 
 ### 线程池
 
-FixedThreadPool：长度固定的线程池。如果某个线程发生异常退出，线程池中的可用数量将增加一
+FixedThreadPool：长度固定的线程池。如果某个线程发生异常退出，线程池中的可用数量将增加一。超过核心线程数的线程(放在队列中的线程不算在线程池中)闲置超过一定时间释放。使用LinkedBolkingQueue作为队列，默认大小正无穷
 
-CachedThreadPool：可缓存的线程池
+CachedThreadPool：可缓存的线程池。核心线程为0，最大线程为正无穷（int的最大值），提供一个同步阻塞队列，缓存近期活跃的线程，默认超时60s闲置释放。
 
 SingleThreadExecutor：单线程的线程池
 
