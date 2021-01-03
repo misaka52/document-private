@@ -246,7 +246,7 @@ private Map<String, String> map;
 
 ```java
 @Configuration
-// .yml文件不生效
+// .yml文件不生效？@PropertySource注解无法识别yml文件
 @PropertySource("classpath:datasource.properties")
 @ToString
 public class MysqlConfiguration {
@@ -554,4 +554,26 @@ juit程序不能识别spring，无法创建Spring容器。可通过@RunWith注�
 1. 类或方法上添加注解@Transcational
 
 2. 开启事务注解：spring ioc容器管理bean上添加@EnableTransactionManagent
+
+## 源码解析
+
+### 1. 手写源码
+
+背景：service、serviceImpl、dao、daoImpl、po
+
+直接生成service的话，需要设置dao，dao又要设置数据源，数据源需要设置地址、账号、密码等属性，每次创建都需要执行这些操作，比较繁琐
+
+spring通过ioc容器管理bean，需要时直接从容器中获取bean，无需关心它的生命周期。主要分为以下几步
+
+1. 读取并解析bean配置文件beans.xml，每种bean生成一个beanDefinition，放入beanDefinition缓存中
+2. 根据beanName获取bean，首先从bean缓存中获取，存在直接返回，不存在再从缓存中获取beanDefinition，创建bean
+3. 创建bean第一步，生成bean对象。一般使用反射方式创建
+4. 创建bean第二步，将依赖的属性注入到bean中
+5. 创建bean第三步，调用bean的初始化方法完成初始化
+
+### 2. 阅读源码
+
+tips：
+
+1. 依赖注入时,通过多种方式注入。通过反射注入域（但是实验都走了setter方法，包括基本类型、String、引用类型，待研究）；通过setter方法注入；数组、list、map通过其他方式填充
 

@@ -4,13 +4,13 @@
 
 ## application配置文件
 
-- key-value格式：yml中value前需要一个空格 key: xxx
+- key-value格式：yml文件中value前需要添加一个空格 key: xxx
 
 ## 插件
 
 ### 1 Actuator监控器
 
-实现监控功能
+添加监控功能配置信息
 
 ```properties
 # actuator监控端口号
@@ -178,21 +178,143 @@ tips
 
 ### 2.7 使用logbak
 
-springboot默认使用logback，spring-boot-starter-web 包中包含logback包
+springboot默认使用logback，spring-boot-starter-web 包中包含logback包。性能上logback要由于slf4j
 
 1. 应用配置文件配置
 
 ```yml
-# logback配置哦
+# logback配置
 logging:
   # 指定格式及位置
   pattern:
-    console: logs-%level||%msg%n
+    # %t 调用线程名；@caller{1} 日志打印位置，1表示深度1
+    # %contextName：上下文名称；@level：日志级别
+    # %msg：日志信息；%n：换行符
+    console: LOG-%t %d{yyyy-MM-dd HH:mm:ss.SSS}||%caller{1}||%contextName||%level||%msg%n
   level:
     root: info
     # 指定包日志级别
     com.ysc.springboot.runner.log: warn
 ```
 
-2. 添加配置文件 src/main/resources/loback.xml
+2. 添加配置文件 src/main/resources/loback.xml （可选）
+
+### 2.8 拦截器
+
+#### 2.8.1 配置类方法
+
+1、 新增拦截器，实现org.springframework.web.servlet.HandlerInterceptor
+
+2、新增继承 org.springframework.web.servlet.config.annotation.WebMvcConfigurtaionSupport类，配置拦截器
+
+```java
+private final LogInterceptor logInterceptor;
+
+@Override
+protected void addInterceptors(InterceptorRegistry registry) {
+  registry.addInterceptor(logInterceptor)
+    .addPathPatterns("/test/**")
+    .excludePathPatterns("/test/hello/**");
+}
+```
+
+### 2.9 使用Servlet
+
+在Servlet2.5版本，只能使用配置类方式；在Servlet3.0版本，新增注解方式
+
+#### 2.9.1 配置类方式
+
+1、继承javax.servlet.http.HttpServlet类，实现需要的接口
+
+2、定义bean注册类，将servlet添加到注册类中
+
+```java
+@Bean
+public ServletRegistrationBean<TestServlet> getServletBean() {
+  TestServlet servlet = new TestServlet();
+  return new ServletRegistrationBean<>(servlet, "/servlet2");
+}
+```
+
+#### 2.9.2 注解方式
+
+1、 继承javax.servlet.http.HttpServlet类，实现需要的接口；在类上添加注解@WebServlet("/servlet")
+
+```java
+@WebServlet("/servlet")
+public class TestServlet extends HttpServlet {
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        PrintWriter out = resp.getWriter();
+        out.println("hello sprintboot servlet-annotation");
+    }
+}
+```
+
+2、配置类上添加注解开启指定包servlet扫描
+
+```java
+@ServletComponentScan("com.ysc.springboot.servlet")
+```
+
+#### 2.10 使用filter
+
+过滤器，Servlet2.5版本只能使用配置类方式；Servlet3.0版本，新增注解方式
+
+**过滤器和拦截器**
+
+容器包裹（前者包裹后者）：tomcat > filter > servlet > interceptor > controller
+
+> 过滤器过滤在拦截器prehandler之前处理
+
+1. 拦截器基于java的反射机制实现；过滤器基于函数回调实现
+2. 拦截器不依赖servlet容器（不能拦截servlet）；过滤器依赖
+3. 拦截器可以获取IOC容器中的bean，过滤器不行
+4. 拦截器只对请求拦截，而过滤器可以拦截进入过滤器的所有的请求，比如静态资源的请求
+5. 拦截器是spring的，过滤器是在servlet容器的
+
+### 2.11 模板引擎
+
+官方推荐使用的模板引擎
+
+**配置方法**
+
+1、引入配置包
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-thymeleaf</artifactId>
+</dependency>
+```
+
+2、配置application
+
+```yml
+spring:
+	thymeleaf:
+    # 开发阶段关闭缓存
+    cache: false
+    # 文件前缀，默认classpath:/templates/
+    prefix: classpath:/templates/
+    # 文件后缀，默认.html
+    suffix: .html
+```
+
+3、生成controller，添加注解@Controller。返回文件名，自动定位到文件
+
+```java
+@Controller
+@RequestMapping("index")
+public class IndexController {
+    @GetMapping("")
+    public String index() {
+        return "index";
+    }
+}
+```
+
+### 2.12 Redis集成
+
+### 2.13 Dubbo集成
 
