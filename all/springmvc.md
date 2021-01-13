@@ -38,33 +38,61 @@ SpringMVC是一种基于MVC设计模式的请求驱动类型的轻量级web框�
 
 ### 六大组件说明
 
-#### 前端控制器 DispatcherServlet
+#### 1.前端控制器 DispatcherServlet
 
 用户请求到达前端控制器，它就相当于mvc模式中的C，dispatcherServlet是整个流程控制的中心，
 
 由它调用其它组件处理用户的请求，dispatcherServlet的存在降低了组件之间的耦合性。
 
-#### 处理器Handler
+#### 2.处理器映射器HandlerMapping
 
-Handler 是继DispatcherServlet前端控制器的后端控制器，在DispatcherServlet的控制下Handler对具体的用户请求进行处理。
+作用：保存handler，对外根据url查询处理器。
 
-由于Handler涉及到具体的用户业务请求，所以一般情况需要程序员根据业务需求开发Handler。
+> Map<String, Object> 存储handler，key为url，value为handler
 
-#### 视图View
+前端控制器调用handlerMapping，返回handlerExecutionChain（包括拦截器和处理器）
+
+#### 3.处理器适配器HandlerAdapter
+
+作用：适配；执行处理器
+
+前端控制器根据类型匹配对应处理器适配器，一个类型对应一种处理器适配器。目前存在适配器类型
+
+1. HttpRequestHandlerAdapter：将httpRequestHandler适配成handlerAdapter
+2. SimpleHandlerAdapter：将simpleHandler适配成handlerAdapter
+3. RequestMappingAdapter：将注解方式处理器适配成handlerAdapter
+
+#### 4.处理器Handler
+
+处理业务请求，由程序员控制。目前存在处理器类型
+
+1. 自定义处理器
+2. HttpRequestHandler接口（标准）
+3. SimpleControllerHandler接口
+4. 注解方式的处理器 @Controller
+
+#### 5.视图解析器ViewResolve
+
+接收前端控制器传入的ModelAndView，将其解析成View返回
+
+#### 6.视图渲染器
+
+将视图美化渲染，返回
 
 #### mvc流程处理
 
 1. 用户发送请求至前端控制器DispatcherServlet
 2. DispatcherServlet收到请求调用处理器映射器HandlerMapping
 3. 处理器映射器根据请求url找到具体的处理器，生成处理器执行链HandlerExecutionChain（包括处理器对象和处理器拦截器）一并返回给DispatcherServlet
-4. DispatcherServlet根据Handler获取处理器适配器HandlerAdapter执行HandlerAdapter处理一系列的操作。如参数封装，数据格式装换，数据验证等操作
-5. 执行处理器Handler（Controller，也叫页面控制器）
-6. Handler执行完成返回ModelAndView
+4. DispatcherServlet根据Handler获取处理器适配器HandlerAdapter并执行HandlerAdapter处理一系列的操作。如参数封装，数据格式装换，数据验证等操作
+5. 拦截器前置处理
+6. 处理器执行器执行处理器Handler（Controller，也叫页面控制器），返回ModelAndView
 7. HandlerAdapter将Handler执行结果ModelAndView返回到DispatcherServlet
-8. DispatcherServlet将ModelAndView传给ViewReslover视图解析器
-9. ViewReslover解析后返回具体View
-10. DispatcherServlet对View进行渲染视图（即将模型数据model填充到视图中）
-11. DispatcherServlet响应用户
+8. 拦截器后置处理
+9. DispatcherServlet将ModelAndView传给ViewReslover视图解析器(多个)解析，解析成View（生成页面）
+10. ViewReslover解析后返回具体View
+11. DispatcherServlet对View进行渲染视图（即将模型数据model填充到视图中）
+12. DispatcherServlet返回给客户端
 
 # 项目搭建
 
@@ -616,5 +644,34 @@ ContextLoaderListener会先被初始化，生成Root WebApplicationContext。Dis
 
 配置@ExceptionHandler进行全局异常处理
 
-## 乱码解决
+# 源码阅读
+
+## 1. springmvc源码
+
+引入包
+
+```xml
+<dependency>
+	<groupId>org.springframework</groupId>
+  <artifactId>spring-webmvc</artifactId>
+</dependency>
+```
+
+### 1.1 类解析
+
+#### 1.1.1 Servlet生命周期
+
+- init：bean初始化调用
+- service：servlet对象被http请求访问时调用
+- destroy：servlet对象被销毁时调用
+
+#### 1.1.2 InitializingBean接口
+
+spring初始化有两种方式：
+
+- 实现initializingBean接口，在bean初始化时会调用afterPropertiesSet方法
+- 通过反射调用配置中的`init-method`属性指定的方法
+  - 系统调用`initializingBean`的初始化方法，然后再调用`init-method`指定的方法
+
+接口配置的效率较高
 

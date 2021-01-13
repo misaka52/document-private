@@ -292,7 +292,9 @@ ApplicationContext context = new AnnotationConfigApplicationContext(JdbcSource.c
 
 #### 概念
 
-aop，Aspect Oriented Programming，面向切面编程。通过预编译和运行期动态代理实现功能统一维护的技术
+aop，Aspect Oriented Programming，面向切面编程。通过**预编译和运行期动态代理**实现功能统一维护的技术
+
+作用：在不修改目标类的前提下，通过AOP技术增强类的功能
 
 AOP是一种编程范式，隶属于软工范畴。Spring将aop思想引入
 
@@ -306,7 +308,7 @@ AOP是OOP（面向对象编程）的延续，是函数式变成的一种衍生�
 
 Joinpoint（连接点）：指的是被拦截到的点。在spring中指的是被拦截的方法，因为spring中只支持方法类型的连接点
 
-Pointcut（切入点）：指的是我们要对那些连接点拦截的定义
+Pointcut（切入点）：指的是我们要对那些连接点拦截的定义。如execution(...)
 
 Advice（通知/增强）：值拦截到连接点之后的动作
 
@@ -376,6 +378,18 @@ Spring已经把AspectJ整合到自身框架中，通过动态织入方式
 - 最终通知：after
 - 环绕通知：around
 - 异常抛出通知：afterThrowing
+
+```xml
+<!--	通知类-->
+	<bean id="logAdvice" class="com.ysc.springmvc.advice.LogAdvice" />
+
+<!--	配置切面-->
+	<aop:config>
+		<aop:aspect ref="logAdvice">
+			<aop:before method="beforeLog" pointcut="execution(* com.ysc.springmvc.controller.*(..))" />
+		</aop:aspect>
+	</aop:config>
+```
 
 #### 使用注解实现
 
@@ -570,10 +584,269 @@ spring通过ioc容器管理bean，需要时直接从容器中获取bean，无需
 3. 创建bean第一步，生成bean对象。一般使用反射方式创建
 4. 创建bean第二步，将依赖的属性注入到bean中
 5. 创建bean第三步，调用bean的初始化方法完成初始化
+   1. 先判断bean是否实现了Aware接口。为类做初始化设置，设置beanName(BeanNameAware), BeanClassLoader(BeanClassLoaderAware),  BeanFactory(BeanFactoryAware)
+   2. 判断是否实现了InitializingBean接口，若实现则调用其afterPropertiesSet方法
+   3. 调用标签中`init-method`指定的初始化方法
 
 ### 2. 阅读源码
 
 tips：
 
 1. 依赖注入时,通过多种方式注入。通过反射注入域（但是实验都走了setter方法，包括基本类型、String、引用类型，待研究）；通过setter方法注入；数组、list、map通过其他方式填充
+
+### 3. AOP实现
+
+通过预编译实现的为静态代理，运行期动态代理实现的为动态代理
+
+#### 3.1 静态代理
+
+AspectJ是一种常用的静态代理，使用AspectJ的几个步骤
+
+step1. 添加依赖
+
+```xml
+<!-- 基于AspectJ的aop依赖 -->
+<dependency>
+  <groupId>org.springframework</groupId>
+  <artifactId>spring-aspects</artifactId>
+  <version>5.0.7.RELEASE</version>
+</dependency>
+<dependency>
+  <groupId>aopalliance</groupId>
+  <artifactId>aopalliance</artifactId>
+  <version>1.0</version>
+</dependency>
+```
+
+Step2. 编写接口和实现类
+
+Step3. 实现通知类
+
+注解实现
+
+```java
+@Component
+@Aspect
+@Slf4j
+public class LogAspect {
+    @Before(value = "execution(* com..TestController.hello())")
+    public void before() {
+        log.info("before-----");
+    }
+
+    @After(value = "execution(* com.*.*.TestController.hello(..))")
+    public void after() {
+        log.info("after-----");
+    }
+
+    // 定义切入点
+    @Pointcut(value = "execution(* com.*.*.TestController.hello2(..))")
+    public void point() {
+    }
+
+    // 复用切入点
+    @Around(value = "LogAspect.point()")
+    public Object around(ProceedingJoinPoint joinPoint) {
+        try {
+            log.info("around-before");
+            Object[] args = joinPoint.getArgs();
+            Object result = joinPoint.proceed(args);
+            log.info("around-afterReturning");
+            return result;
+        } catch (Throwable throwable) {
+            throwable.printStackTrace();
+            log.info("around-afterThrowing");
+            return null;
+        }
+    }
+}
+```
+
+Step5. 开启自动代理
+
+注解方式：配置类添加注解@EnableAspectJAutoProxy
+
+xml方式：添加 <aop:aspectj-autoproxy/>
+
+AspectJ通知类型：前置通知before，后置通知afterReturning，最终通知After，异常通知AfterThrowing，环绕通知
+
+```java
+//@Before
+try {
+  // 连接点方法
+  //@AfterReturning
+  catch (Exception e) {
+    // @AfterThrowing
+  } finally {
+    // @After
+  }
+}
+
+// aroud 自定义写法
+```
+
+#### 3.2 动态代理
+
+jdk动态代理
+
+cglib动态代理
+
+#### 3.3 aop实现
+
+> 根据自定义标签寻找对应类
+>
+> mvc标签对应MvcNamespaceHandler
+
+ aop代理工厂：DefaultAopFactory
+
+##### 3.3.1 Aop通知类通知顺序
+
+1、相同类型的通知类，以xml中定义的顺序为主
+
+2、不同类型的通知类，由对应的MethodInterceptor实现来保证顺序。比如MethodBeforeAdviceInterceptor 先于其他通知类执行
+
+#### 3.4 事务
+
+TransactionInterceptor
+
+#### 3.5 循环依赖问题
+
+**1）当多个类相互依赖，依赖关系形成闭环，则成为循环依赖**
+
+**2）循环依赖的分类**
+
+- 构造器的循环依赖。无法自动解决，spring会抛出BeanCurrentlyInCreationException
+- setter方法的循环依赖。spring可以自动解决，采用提前暴露对象的方法。在实例化对象之后，依赖注入之前，将本身保存在DefaultSingletonBeanRegistry中，以供依赖注入时注
+
+**3）如何检测循环依赖**
+
+```java
+// DefaultSingletonBeanRegistry.class
+// bean创建前
+protected void beforeSingletonCreation(String beanName) {
+		if (!this.inCreationCheckExclusions.contains(beanName) && !this.singletonsCurrentlyInCreation.add(beanName)) {
+			throw new BeanCurrentlyInCreationException(beanName);
+		}
+	}
+
+// bean创建后
+protected void afterSingletonCreation(String beanName) {
+		if (!this.inCreationCheckExclusions.contains(beanName) && !this.singletonsCurrentlyInCreation.remove(beanName)) {
+			throw new IllegalStateException("Singleton '" + beanName + "' isn't currently in creation");
+		}
+	}
+
+// 调用
+public Object getSingleton(String beanName, ObjectFactory<?> singletonFactory) {
+  ...
+  beforeSingletonCreation(beanName);
+  ... // 创建对象
+  afterSingletonCreation(beanName);
+  ...
+}
+```
+
+**4) 如何解决循环依赖**
+
+AbstractAutowireCapableBeanFactory#doCreateBean
+
+```java
+protected Object doCreateBean(final String beanName, final RootBeanDefinition mbd, final @Nullable Object[] args)
+			throws BeanCreationException {
+  // 1. bean实例化
+  if (instanceWrapper == null) {
+			instanceWrapper = createBeanInstance(beanName, mbd, args);
+		}
+  // -- 提前将bean保存到DefaultSingletonBeanRegistry中，供依赖注入使用。只能时单例bean
+  boolean earlySingletonExposure = (mbd.isSingleton() && this.allowCircularReferences &&
+				isSingletonCurrentlyInCreation(beanName));
+		if (earlySingletonExposure) {
+			if (logger.isDebugEnabled()) {
+				logger.debug("Eagerly caching bean '" + beanName +
+						"' to allow for resolving potential circular references");
+			}
+			addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));
+		}
+ 
+  // 2. 依赖注入
+  populateBean(beanName, mbd, instanceWrapper);
+  // 3. bean初始化
+  exposedObject = initializeBean(beanName, exposedObject, mbd);
+  ...
+    if (earlySingletonExposure) {
+      // 从DefaultSingletonBeanRegistry.earlySingletonObjects中获取代理bean信息，同时移除singleFactories中bean
+      // 这里调用getSingleton获取提前的暴露的bean信息，仅能返回代理对象。而代理对象只在bean放入到singleFactories中（未初始化完成），且有同时被其他bean引用时，才会将这种bean从singleFactories（单例工厂缓存）移动到代理对象缓存earlySingletonObjects中
+      // 比如A依赖B，且B依赖A。当首次注入A时，A保存到单例工厂缓存中；为A对象依赖注入B时，构造B对象，将B对象放入单例工厂缓存中，同时获取A对象来注入，此时处于单例工厂缓存中的A被依赖，则将A移到代理对象缓存中，返回给B注入。最后getSingleton获取到为代理对象，去替换A正常流程中的产生对象的引用
+      Object earlySingletonReference = getSingleton(beanName, false);
+    }
+}
+```
+
+
+
+
+
+## 整理
+
+### 1. 依赖注入
+
+1）域注入
+
+直接注入字段
+
+```java
+@Autowired
+private TestService service;
+```
+
+优点：
+
+1. 使用简单
+2. 可自动解决循环依赖
+
+缺点：
+
+1. 不能保证实例的完整性。依赖注入有一定的顺序，存在一段时间实例还未完成依赖注入
+
+2) 构造器注入
+
+```java
+public class TestController {
+  private final TestService service;
+  public TestController(TestService service) {
+    this.service = service;
+  }
+}
+```
+
+目前spring官方推荐构造器注入法，主要由以下优点
+
+1. 保证实例不可变。属性用final修饰，不可改变
+2. 保证依赖不为空。spring构造器注入时，若存在对应的参数，则传入构造器；若不存在直接报错，不会注入null
+3. 保证实例的完整性。在返回给客户端时是一个具有完整依赖的实例
+
+缺点
+
+1. 如果参数过多的话，构造器入参会很多，显得臃肿。但换个角度考虑，如果注入的依赖过多，就违背了单一原则
+2. 不能解决循环依赖。
+
+3）setter注入
+
+同域注入类似
+
+```java
+public class TestController {
+  private TestService service;
+  @Autowired
+  public void setTestService(TestService service) {
+    this.service = service;
+  }
+}
+```
+
+
+
+## 疑问
+
+1. 动态代理。spring、springboot注入类中什么时候会使用代理，使用哪一种
 
