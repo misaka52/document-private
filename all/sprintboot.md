@@ -318,3 +318,133 @@ public class IndexController {
 
 ### 2.13 Dubbo集成
 
+### 2.14 自定义starter
+
+- spring官方定义的starter包命名：spring-boot-starter-{name}
+- 非官方定义的starter命名：{name}-spring-boot-starter
+
+#### 1. 注解解释
+
+**@EnableConfigurationProperties**
+
+获取配置类，该方式指定的配置类，无需被spring ioc容器管理
+
+**@ConditionalOnClass**
+
+当指定类存在时生效
+
+**@ConditionalOnBean**
+
+当指定bean存在时生效
+
+**@ConditionalOnMissingBean**
+
+当bean确实时生效
+
+**@ConditionalOnProperty**
+
+当属性满足条件后生效
+
+- value：指定属性名
+- matchIfMissing：当属性缺失时匹配结果，默认falise
+- havingValue：指定匹配值，当属性为该值时匹配结果为true。默认""，当不指定该属性时，匹配结果一定为true
+
+**@Import**
+
+直接将指定类导入到IOC容器中，可以导入一般类（非ioc容器管理类）和三方jar包类
+
+**@Inherited**
+
+指使用该注解的类的子类，能自动继承该注解。不如B继承了A，A上存在@Inherited的注解，B能直接拥有
+
+#### 2. 代码样例
+
+引入包
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-autoconfigure</artifactId>
+  <version>2.1.5.RELEASE</version>
+</dependency>
+
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-configuration-processor</artifactId>
+  <version>2.1.5.RELEASE</version>
+  <optional>true</optional>
+</dependency>
+
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-autoconfigure-processor</artifactId>
+  <version>2.1.5.RELEASE</version>
+  <optional>true</optional>
+</dependency>
+```
+
+```java
+package com.ysc.exercise;
+
+import com.ysc.exercise.service.WrapConfiguration;
+import com.ysc.exercise.service.WrapService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+// 自动注入类
+@Configuration
+@EnableConfigurationProperties({WrapConfiguration.class})
+@ConditionalOnClass(WrapService.class)
+public class WrapAutoConfiguration {
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(value = "spring.wrap.enable", matchIfMissing = true, havingValue = "true")
+    public WrapService registerWrap(WrapConfiguration wrapConfiguration) {
+        return new WrapService(wrapConfiguration.getPrefix(), wrapConfiguration.getSuffix());
+    }
+
+    /**
+     * 默认注入
+     * @return
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public WrapService registerWrap2() {
+        return new WrapService("", "");
+    }
+
+}
+```
+
+META-INF/spring.factories
+
+```properties
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+com.ysc.exercise.WrapAutoConfiguration
+
+# 多配置样例
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+com.ysc.exercise.WrapAutoConfiguration,\
+com.ysc.exercise.WrapAutoConfiguration2
+```
+
+#### 3. 源码 研究
+
+**@EnableXXX**
+
+该注解表示开启某一项功能，为了简化代码的导入，使用了该注解，就能自动导入某些类，一般是组合注解。被导入的类分为三种：配置类、选择器、注册器
+
+- 配置类：@Import中指定的类一般以Configuration结尾，并且携带@Configuration注解， 
+- 选择器：@Import中指定的类一般以Selector结尾，且实现了ImportSelector接口，如@EnableAutoConfiguration
+- 注册器：@Import中指定的类一般以Register结尾，且该类实现了接口，用于导入注册器。该类可以在代码运行时动态注册指定类的实例
+
+starter加载
+
+1. 启动类注解@SpringBootApplication中携带注解@EnableAutoConfiguration，具体选择器AutoConfigurationImportSelector
+2. AutoConfigurationImportSelector.getAutoConfigurationEntry -> getCandidateConfigurations() -> loadFactoryNames() -> loadSpringFactories()
+
