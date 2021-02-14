@@ -2090,6 +2090,79 @@ Slave_SQL_Running：slave sql运行状态
 - NULL：表示主从复制为开启
 - 数字：主从复制的延迟的时间，单位秒。为0时表示延迟无延迟
 
+#### 1.5 Mac下配置双实例
+
+Step1：创建配置文件
+
+```txt
+[mysqld_multi]
+#mysqld     = /usr/local/mysql/bin/mysqld_safe
+mysqladmin = /usr/local/mysql/bin/mysqladmin
+user       = root
+password   = 123456
+
+
+
+[mysqld3307]
+server-id=3307
+port=3307
+log-bin=mysql-bin
+
+log-error=/Users/ysc/Softwares/mysql/mysql-cluster/master/mysqld.log
+tmpdir=/Users/ysc/Softwares/mysql/mysql-cluster/master
+slow_query_log=on
+slow_query_log_file =/Users/ysc/Softwares/mysql/mysql-cluster/master/mysql-slow.log
+long_query_time=1
+
+socket=/Users/ysc/Softwares/mysql/mysql-cluster/master/mysql_3307.sock
+pid-file=/Users/ysc/Softwares/mysql/mysql-cluster/master/mysql.pid
+
+basedir=/Users/ysc/Softwares/mysql/mysql-cluster/master
+datadir=/Users/ysc/Softwares/mysql/mysql-cluster/master/data
+
+[mysqld3308]
+server-id=3308
+port=3308
+log-bin=mysql-bin
+
+log-error=/Users/ysc/Softwares/mysql/mysql-cluster/slave/mysqld.log
+tmpdir=/Users/ysc/Softwares/mysql/mysql-cluster/slave
+
+slow_query_log=on
+slow_query_log_file =/Users/ysc/Softwares/mysql/mysql-cluster/slave/mysql-slow.log
+long_query_time=1
+
+socket=/Users/ysc/Softwares/mysql/mysql-cluster/slave/mysql_3308.sock
+pid-file=/Users/ysc/Softwares/mysql/mysql-cluster/slave/mysql.pid
+
+
+basedir=/Users/ysc/Softwares/mysql/mysql-cluster/slave
+datadir=/Users/ysc/Softwares/mysql/mysql-cluster/slave/data
+
+read_only=1
+
+
+[mysqld]
+character_set_server=utf8
+```
+
+step2:  创建主从文件目录 master, slave 
+
+Step3：通过mysql_multi启动双实例
+
+```sh
+mysqld_multi --defaults-file=cluster.cnf start
+# report查看运行状态
+```
+
+Step4: 启动mysql
+
+```sh
+sudo /usr/local/mysql/support-files/mysql.server start
+```
+
+Step5: 按照1.3 配置主服务器和从服务器
+
 ### 2. 集群搭建之读写分离
 
 当需要分散机器读写压力，需要用到读写分离。主节点只负责写，从节点负责读（负载均衡）。以下可以通过两个工具完成读写分离 mysql-proxy和mysql-router
@@ -2221,15 +2294,17 @@ Step3：进入bin目录
 
 ### 3 sharding jdbc
 
+http://shardingsphere.apache.org/index_zh.html
+
 ![image-20210209203040884](../image/image-20210209203040884.png)
 
 #### 3.1 读写分离配置
 
-https://shardingsphere.apache.org/document/legacy/3.x/document/cn/manual/sharding-jdbc/usage/read-write-splitting/
+https://shardingsphere.apache.org/document/legacy/4.x/document/cn/manual/sharding-jdbc/usage/read-write-splitting/
 
 #### 3.2 分库分表配置
 
-https://shardingsphere.apache.org/document/legacy/3.x/document/cn/manual/sharding-jdbc/usage/sharding/
+https://shardingsphere.apache.org/document/legacy/4.x/document/cn/manual/sharding-jdbc/usage/sharding/
 
 #### 3.3 其他
 
