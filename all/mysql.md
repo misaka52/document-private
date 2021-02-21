@@ -1923,6 +1923,48 @@ mysql> show profile for query 6;
 
 >  服务器层优化偏向于dba的工作，更多优化后续有需要再添加
 
+### 5. 其他sql优化
+
+#### 5.1 count(*), count(1), count(列名)
+
+参考：https://zhuanlan.zhihu.com/p/28397595
+
+##### 5.1.1 Myisam引擎
+
+myisam保存了每个表的总数量值，当使用count(*)是直接获得结果，但不能带where条件
+
+##### 5.2.2 InnoDB引擎
+
+Count(*), count(1)和count(主键) 都会自动优化，优化如下
+
+- 当不存在主键时，不适用索引，全表扫描
+- 当仅存在主键时，使用扫描主键索引
+- 当同时存在主键索引和辅助索引时，选择一个最小的辅助索引扫描
+
+> Conut(1) 和count(N)效果一样
+>
+> 为啥选择辅助索引不选择主键索引？因为主键索引叶子节点更大，扫描时产生的io更多，索引肯定从辅助索引中选择
+
+当使用count(列名)时，若列为辅助索引，则扫描对应索引；若列为非索引字段，则全表扫描，应该类似于扫描主键索引
+
+```mysql
+# 测试表
+CREATE TABLE `data_large` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `gid` int(11) DEFAULT NULL,
+  `address` varchar(20) DEFAULT NULL,
+  `tiny_id` tinyint(4) DEFAULT '1',
+  PRIMARY KEY (`id`),
+  KEY `gid_idx` (`gid`),
+  KEY `tiny_id_idx` (`tiny_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=24509783 DEFAULT CHARSET=utf8mb4
+
+# 可以通过force强制指定索引
+explain select count(id) from data_large force index(`PRIMARY`);
+```
+
+
+
 ## 九、集群
 
 ### 1. 主从复制
