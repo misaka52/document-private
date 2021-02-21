@@ -1,18 +1,16 @@
 [TOC]
 
-## 0 总结
-
 ### 前置问题
 
 1. mysql RR隔离级别可以解决幻读中的插入数据问题，但仍然能读取到删除的数据。解决幻读是通过间隙锁来实现的吗？那么读取的时候是不是不能在间隙锁之间插入数据？ 
 
    不是，利用MVCC机制，readView保存活跃事务。可以
 
-2. 对于组合索引(a,b,c)，若c = 3 and b = 2 and a = 1是否会使用索引
+2. 对于组合索引(a,b,c)，若c = 3 and b = 2 and a = 1是否会使用索引？会，mysql会对自动优化sql顺序
 
-3. 使用in时会不会用到索引。超过1个元素不能用到索引
+3. 使用in时会不会用到索引？当in中包含多个元素时，表中数据量小时，in集合中的元素占比总数据量比率小时会用到索引，较大不会用到索引；当表中数据量比较大时，in都会用到索引
 
-4. 使用or会不会用到索引。索引失效
+4. 使用or会不会用到索引？主键索引会用到，非主键索引需要看in集合数量/总数量，若比率小于等于指定值（约0.18）则使用索引，否则不使用索引
 
 5. unlock tables; 释放锁
 
@@ -32,25 +30,19 @@
 1. union收集所有结果后去重。union all直接收集结果，不去重
 2. 隐式转换也可能会使用索引，如果转换足够简单的话
 
-### 后置总结
+## 总结
 
-#### 索引
+### 问题
 
-1. explain解析。key，rows，Extra
-2. 索引优势、劣势，sql预发
-3. 索引数据结构。聚簇索引和非聚簇索引。主键索引、辅助索引、覆盖索引、组合索引、索引条件下推
-4. 索引失效情况：不符合最左匹配法则；使用in或or；使用不等于；索引列使用计算公式；使用不等号；字符串需要加引号
+1. binlog日志刷新到磁盘的时间？
 
-#### 锁
+> 每次事务提交就刷新？或者仅依赖于checkpoint机制
+>
+> 答：在每事务提交时刷新到磁盘。通过sync_binlog控制每提交几次事务刷新到binlog文件一次
 
-1. 全局锁；表锁：共享锁、排它锁、意向锁、元数据锁、自增锁；
-2. 行记录锁：记录锁、间隙锁、临键锁、插入意向锁
-3. 行锁加锁规则：主键索引的等值查询和范围查询，辅助索引的等值查询和范围查询，无索引的查询
-4. RC、RR、Serialiable隔离级别下不同加锁规则
-5. ICP影响加锁范围
-6. 死锁
+2. redo loge文件格式，保存的是什么内容？
 
-
+答：保存修改后数据，即物理日志。
 
 
 
@@ -74,7 +66,7 @@ mysql>set password for 'root'@'localhost'=password('新密码');
 
 ## 一、逻辑架构图
 
-![](/Users/ysc/IdeaProjects/learning/document-private/image/src=http___s3.51cto.com_wyfs02_M01_75_48_wKiom1Y0c5ayz-IFAAMMUqTycYQ172.jpg&refer=http___s3.51cto.jpeg)
+![](../image/src=http___s3.51cto.com_wyfs02_M01_75_48_wKiom1Y0c5ayz-IFAAMMUqTycYQ172.jpg&refer=http___s3.51cto.jpeg)
 
 ### 1 Connectors
 
@@ -419,7 +411,7 @@ mysql> show variables like 'innodb_file_per_table';
 
 **重做日志的作用**
 
-用于备份，数据恢复。为提升可高可行，可以设置多个镜像日志组，将重做日志保存在不同机器上
+用于备份，数据恢复。为提升高可用性，可以设置多个镜像日志组，将重做日志保存在不同机器上
 
 **重做日志组如何写入数据**
 
@@ -561,11 +553,11 @@ InnoDB内存缓冲池刷新到page完成持久化，一个是脏页落盘；一�
 
 ##### 2.2.3 重做日志落盘
 
-落盘策略，通过`innodb_flush_log_at_tx_commit`来控制
+落盘策略，通过`innodb_flush_log_at_trx_commit`来控制
 
 - 0：MYSQL每秒一次将log buffer中的数据写入到日志文件并同时fsync刷新到磁盘中。最多丢失1s的数据
 - 1：每次事务提交时，将log buffer写入日志文件并同时fsync刷新到磁盘。默认，不会丢失数据
-- 2：每次事务提交时，将log buffer写入日志文件，然后MYSQL以每秒一次将日志文件中数据同步到磁盘中。若机器发生故障，日志文件意外丢失则可能丢失1s的数据
+- 2：每次事务提交时，将log buffer写入日志文件缓冲，然后MYSQL以每秒一次将日志文件缓冲中数据同步到磁盘中。若机器发生故障，日志文件意外丢失则可能丢失1s的数据
 
 > fsync是阻塞的，直到完成之后才能返回
 
@@ -596,7 +588,7 @@ checkPoint分类
 
 > redo log日志不足以恢复吗？
 >
-> 一般情况时可以直接拿redo log日志恢复的，但是如果出现redo log复制页时只复制的一般，机器宕机，页只复制一半导致页不可用，数据丢失。且redo log中只记录了修改的数据，而非记录数据页的完整内容
+> 一般情况时可以直接拿redo log日志恢复的，但是如果出现redo log复制页时只复制的一半，机器宕机，页只复制一半导致页不可用，数据丢失。且redo log中只记录了修改的数据，而非记录数据页的完整内容
 
 #### 2.5 redo log buffer 重做日志缓冲
 
@@ -629,7 +621,7 @@ checkPoint分类
 
 #### 2.2 隔离级别
 
-存在四种隔离级别，由变量`tx_isolation`控制
+存在四种隔离级别，由变量`tx_isolation`或`transaction_isolation`控制
 
 ##### 2.2.1 未提交读（READ UNCOMMITTED）
 
@@ -674,6 +666,8 @@ checkPoint分类
 
 ### 4 InnoDB的MVCC实现
 
+MVCC指一种高并发的技术，读无需加任何锁，InnoDB的MVCC的实现依赖：隐藏字段，ReadView，undo log
+
 #### 4.1 当前读和快照读
 
 当前读：读取的数据为最新数据，读取时对数据添加锁，数据不能被修改。更新、删除操作使用
@@ -693,11 +687,63 @@ undo log指的是为回滚记录的日志。回滚段分为插入回滚段和更
 
 > 事务回滚，应该执行sql的逆向操作（undo会存储逆向操作的sql，insert提交后应该就是删除这部分内容），恢复原有数据和索引。先回滚二级索引，再回滚聚集索引。
 
-#### 4.4 行记录新增字段
+undo log理解应该至少有两种，一种是逻辑的日志，如下面的insert/update undo log，用于回滚；一种history list，指行记录的历史版本
 
-参考：https://cloud.tencent.com/developer/article/1454636
+##### 4.3.1 insert undo log
 
-InnoDB存储的MVCC实现为每条行记录新增了几个字段：DATA_TRX_ID、DATA_ROLL_PTR、DB_ROW_ID（当没有主键时会隐式生成该字段）
+![image-20210218013237352](../image/image-20210218013237352.png)
+
+insert undo log记录如上，带*号表示对存储的字段进行了压缩
+
+- next：记录了一下undo log的位置，通过该字段可以知道下一个undo log所占的空间字节数
+- start：记录该undo log的开始位置
+- type_cmpl：占用一字节，记录undo的类型。insert undo log类型存储的总是11
+- undo no：记录事务的id
+- table id：记录undo log对应的表对象id
+- lenN colN：记录了本次操作所有新增的主键的列和值，当需要进行回滚时，根据主键找到对应的记录删除即可
+
+> insert undo log比较好理解，正对一个事务操作的一张表，记录了插入的主键的列和值。len-唯一键名，col-值。需要回滚时只需根据唯一键值查询原数据再删除即可。
+
+##### 4.3.2 update undo log
+
+![image-20210218013711070](../image/image-20210218013711070.png)
+
+- DATA_TRX_ID：旧记录的事务id
+- DATA_ROLL_PTR：旧记录的回滚段指针
+- undate vector：表示因update操作导致发生改变的列，每个修改的列信息都要记录在undo log中
+- type_cmpl：undate undo log类型
+  - 12 TRX_UNDO_UPD_EXIST_REC：更新未被删除的记录
+  - 13 TRX_UNDO_UPD_DEL_REC：更新一条已被删除的记录，列值可被修改；在innodb中时允许的，比如某条记录删除后，很快插入相同键值的记录，之前的记录还未被purge，就可能重用该记录的位置。将delete的记录标记为not DELETE
+  - 14 TRX_UNDO_UPD_MARK_REC：将就标记为delete
+- info_bits : 取自rec_get_info_bits，例如记录是否被标记删除
+
+> undate undo log是针对一个事务下一个表的一个DML操作。
+>
+> n_unique_index表示唯一键列和值
+>
+> n_update_field表示旧表的数据
+>
+> n_bytes_below表示新表数据
+
+##### 4.3.3 崩溃恢复
+
+当实例从崩溃恢复时，需要将活跃的事务从undo中提取出来，对于ACTIVE的直接回滚；对于prepare的事务，如果该事务对应的binlog已经提交，则提交，否则回滚
+
+**回滚实现**
+
+先根据redo重做undo，读取其状态和类型等信息，创建内存结构，并存到每个回滚段上的undo list上
+
+当初始化完成undo对象后，据此来恢复崩溃之前的事务链。根据回滚段的insert_undo_list来恢复插入事务，根据回滚段的update_undo_list来恢复更新事务。若同时存在插入和更新事务，则只恢复一个事务。出了恢复事务对象外，还需要恢复表锁及读写事务链表，从而恢复到崩溃之前的场景
+
+当从undo恢复到崩溃前活跃的事务对象后，后台开启一个线程去进行回滚和清理操作。对于ACTIVE状态事务直接回滚；对于即非ACTIVE也非PREPARE状态的事务，则认为它时提交的，直接释放事务对象；对于PREPARE事务，进入XA Recover阶段，Server会扫描最后一个binlog文件，搜索undo记录中的XID（MYSQL_BIN_LOG::recover），若对应的XID已经存在binlog中，则提交事务，否则回滚事务。
+
+> 为何只扫描最后一个binlog，因为每次写下一个binlog文件时，就表示上一个文件已经落盘成功了
+
+#### 4.4 行记录隐藏字段
+
+经典参考（附带源码认证）：https://blog.csdn.net/Waves___/article/details/105295060
+
+InnoDB存储的MVCC实现为每行记录新增了几个字段：DATA_TRX_ID、DATA_ROLL_PTR、DB_ROW_ID（当没有主键时会隐式生成该字段）
 
 **DATA_TRX_ID**
 
@@ -705,7 +751,7 @@ InnoDB存储的MVCC实现为每条行记录新增了几个字段：DATA_TRX_ID�
 
 **DATA_ROLL_PTR**
 
-表示指向该记录回滚段的指针，大小为7字节，InnoDB通过该字段找到之前版本的数据。在undo中以通过链条的形式连接
+回滚指针，记录当前记录行的undo log信息，大小为7字节，InnoDB通过该字段找到之前版本的数据。在undo中以通过链条的形式连接
 
 **DB_ROW_ID**
 
@@ -727,20 +773,28 @@ InnoDB存储的MVCC实现为每条行记录新增了几个字段：DATA_TRX_ID�
 
 #### 4.6 如何实现一致性读-ReadView
 
-对于MVCC读取操作，通过ReadView来维护当前已开始但未完成的事务，即活跃事务，来避免其他事务读到未提交事务的信息。ReadView中活跃的事务ID列表为m_ids，其中最小值为up_limit_id，最大值为low_limit_id，事务ID是事务开启是InnoDB分配的，决定了事务的先后顺序，具体判断流程如下
+经典参考（附带源码认证）：https://blog.csdn.net/Waves___/article/details/105295060
 
-- 若被访问版本的trx_id小于m_ids中的最小值，表明事务已提交，则该事务可以被访问
-- 若被访问版本的trx_id大于m_ids中的最大值，表明被访问的事务是在获取ReadView时开始的，该事务不能被访问
-- 若被访问版本的trx_id介于m_ids的最小值和最大值之前，判断该trx_id是否存在m_ids中，若存在则表明访问事务还是活跃事务，不能被访问；反之则可以被访问
-- 经过一系列判断得到记录后，再判断记录是否被删除，若删除则继续查找下一节点
+ReadView数据结构
 
-其中ReadView是单个事务持有的，其中RU和序列化不支持ReadView，一个只读取最新数据，一个对每个操作都加锁，都能读取到最新数据。对于RC和RR支持如下
+- Tx_ids：当前活跃事务id集合，表示已经开始但未提交的活跃事务，这些事务对当前事务可不见
+- up_limit_id：活跃事务集合中最小id。小于该id表示事务已提交，对当前事务可见。
+- low_limit_id：当前出现过的最大事务id+1（即下一个即将分配的事务id）。大于该事务表示在ReadView创建之后的事务，RR下对当前事务不可见
+- creator_trx_id：创建当前事务的id
 
-ReadView属性
+ReadView用来维护当前活跃事务，保存了对当前事务不可见的事务
 
-- low_limit_id: 最大事务id，大于该值的都是对于view一定不可见的
-- up_limit_id: 最小事务id，小于该值的都是已提交的事务，对view一定可见
-- Low_limit_no: trx_no小于该值的undo log都是可以purge的
+可见性比较算法，trx_id：进行比较的目标事务id
+
+1. 如果trx_id < up_limit_id，表示对当前事务可见，跳至5
+2. 如果trx_id >= low_limit_id，表示该事务对当前事务不可见，跳至4
+3. 如果up_limit_id <= trx_id  < low_limit_id，判断trx_id是否存在于trx_ids中，使用二分查找法，活跃事务id是顺序的
+   1. 若存在，表示对当前事务不可见，跳至4。
+   2. 若不存在，表示对当前事务可见，跳至5。
+4. 根据回滚指针从undo log中取出上一版本的事务id即为trx_id，跳至1继续判断
+5. 将当前事务可见行返回（最后还应该判断一下，行记录的删除标记是否为true，不为true才返回）
+
+其中ReadView是单个事务持有的，其中RU和序列化不支持MVCC的，一个只读取最新数据，一个对每个操作都加锁，都能读取到最新数据。对于RC和RR支持如下
 
 trx_sys 事务系统
 
@@ -758,21 +812,25 @@ trx_sys 事务系统
 >
 > 注意：在第一条查询语句执行之前生成而非在事务开启时就生成
 
+##### 4.6.3 当前读不适用ReadView
+
+当前读是加锁读，每次都读取最新数据。ReadView只适用于快照读
+
 #### 4.7 MVCC的争论点
 
 ##### 4.7.1 RC下MVCC的问题
 
-![](/Users/ysc/IdeaProjects/learning/document-private/image/b3wnejlzm7.jpeg)
+![](../image/b3wnejlzm7.jpeg)
 
 在RC隔离模式下，对于上述流程，事务B晚于事务A执行，事务A却读到了事务B提交的数据
 
 ##### 4.7.2 RR下MVCC的问题
 
-![](/Users/ysc/IdeaProjects/learning/document-private/image/tgmf0zg899.jpeg)
+![](../image/tgmf0zg899.jpeg)
 
 在RR隔离级别下，对于上述流程，事务B晚于事务A执行，事务A却读到了事务B提交的数据
 
-> 上述问题可以理解为：每次都获取最新的ReadView，不管当前事务号与被访问的事务号的大小关系，只关心ReadView中的最大最小版本号，而且理解最大事务号可以理解为一个维护的变量，新增活跃事务时事务id更新，移除时不更新或异步更新不及时导致读取到了新事务的数据。
+> 上述问题可以解释为：ReadView保存的最大id为当前最大事务id+1
 
 #### 4.8 purge
 
@@ -786,7 +844,7 @@ undo log存储不同于redo log，它保存在特殊的回滚段中。因redo lo
 
 ### 6 锁获取实战
 
-> 一下为InnoDB存储引擎，隔离级别RR
+> 以下为InnoDB存储引擎，隔离级别RR
 
 #### 6.1 互相占用
 
@@ -817,114 +875,15 @@ commit;
 
 个人猜想，事务根据表级获取所有的需要的锁，当遇到更新或删除语句时，获取该事务下所有需要的锁
 
+### 7 事务的实现
+
+隔离性由锁机制实现。redo log实现原子性和持久化。undo log实现一致性，决定事务回滚或提交
+
 ## 六、索引
 
 ### 1. Explain
 
-explain用来分析sql语句的执行情况，使用如下
-
-```mysql
-mysql> explain select * from index_combined where a = 1 \G
-*************************** 1. row ***************************
-           id: 1
-  select_type: SIMPLE
-        table: index_combined
-   partitions: NULL
-         type: ref
-possible_keys: combined
-          key: combined
-      key_len: 5
-          ref: const
-         rows: 1
-     filtered: 100.00
-        Extra: NULL
-1 row in set, 1 warning (0.00 sec)
-```
-
-**1.1 id**
-
-可以理解为sql执行顺序的表示，从大到小的执行
-
-1. id相同时，执行顺序从上至下
-2. 如果是子查询，id序号会递增，id越大优先级越高，越早执行
-
-**1.2 select_type**
-
-显示每个查询的类型
-
-1. SIMPLE：简单的select，不适用union和子查询
-2. PRIMARY：查询中若包含任何复杂的字部分，最外层的select被标记为PRIMARY
-3. UNION：UNION中的第二个或后面的SELECT语句
-4. DEPENDENT UNION：UNION中的第二个或后面SELECT语句，取决于外面的查询
-5. UNION RESULT：UNION的结果
-6. SUBQUERY：子查询的第一个SELECT
-7. DEPENDENT SUBQUEY：子查询的第一个SELECT，取决于外面的查询
-8. DERIVED：派生表的SELECT，FROM子句的子查询
-9. UNCACHEABLE SUBQUERY：一个子查询的结果不能被缓存，必须重新评估外链接中的第一行
-
-**1.3 table**
-
-显示这一行数据属于哪个表，有时不是真实的表，表名为derivedX
-
-**1.4 type**
-
-表示数据的查询方式，常见类型有
-
-1. ALL：FULL TABLE SCAN，全表扫描
-2. index：Full Index Scan，全索引树扫描
-3. range：只检索给定范围的行，使用一个索引来选择行
-4. ref：表示上述表的连接匹配条件，即哪些列或常量被用于查找索引列上的值
-5. eq_ref：和ref类型，区别是eq_ref使用的唯一索引
-6. const、system：当mysql对某部分进行优化， 并转化为一个常量，使用这些类型访问。当使用主键查询时，就能转换为一个常量。system是const类型的特例
-7. NULL：mysql在优化过程中分解语句，执行时甚至不用访问表或索引
-
-**1.5 possible_keys**
-
-指出sql所有可能用到的索引，针对where查询列中列出所有索引，但不一定真正使用到
-
-若该列为NULL，则表示没有使用索引
-
-**1.6 key**
-
-展示实际命中的索引
-
-若想强制mysql使用或忽略指定prossible_keys列中的索引，使用FORCE INDEX、USE INDEX或IGNORE INDEX
-
-**1.7 key_len**
-
-表示索引中使用的字节数，改长度为表定义的长度而非实际的长度
-
-**1.8 ref**
-
-表示上述表的连接匹配条件，即哪些列或常量被用于查找索引列上的值
-
-**1.9 rows**
-
-表示MYSQL的根据表统计信息和索引选用情况，得出的预计扫描的总条数
-
-**1.10 Extra**
-
-该列包含mysql解决查询的详细信息
-
-1. Using where：未命中索引
-2. using temporary：表示使用临时表来存储结果，常用于排序和分组查询
-3. using filesort：无法利用索引完成的排序称为“文件排序”
-4. using join buffer：该值强调了在连表时没有使用索引，并且需要缓冲区来保存中间结果。出现该情况时需要注意添加索引
-5. impossible where：表示使用了无效的where查询条件，无法查询到结果。比如where 1 = 0
-6. select tables optimized away：该值意味着仅通过使用索引，优化器可能仅从聚合函数结果中返回一行
-7. using index condition：表示使用了索引下推ICP（mysql5.7版本之后支持）
-
-**1.11 filtered**
-
-过滤率=最终结果/扫描结果
-
-**1.12 其他**
-
-- explain没有触发器、存储过程或自定义函数的信息
-- explain不考虑各种cache
-- explain不能显示sql在执行查询时的优化工作
-- 部分统计信息只是估算的
-- explain只适用于用于select
+见下面sql优化部分
 
 ### 2 索引介绍
 
@@ -940,7 +899,7 @@ possible_keys: combined
 #### 2.2 劣势
 
 - 索引需要额外磁盘空间
-- 在更新和删除时需要同步更新索引文件的数据，会导致操作变慢
+- 在插入、更新和删除时需要同步更新索引文件的数据，会导致操作变慢
 
 #### 2.3 索引创建、删除、修改
 
@@ -993,9 +952,22 @@ show index from table_name;
 
 官方地址：https://dev.mysql.com/doc/refman/5.7/en/innodb-index-types.html
 
-聚簇索引（聚集索引）：数据和索引都存放在一起
+聚簇索引：数据和索引都存放同一个文件，比如Innodb引擎
 
-非聚簇索引（非聚集索引）：数据和索引分开存放
+非聚簇索引：数据和索引存放在两个文件，比如Myisam引擎
+
+聚簇索引优点
+
+1. 当进行主键范围查询时，可以一次io读出多个节点，io次数更少。而非聚簇索引需要限定为主键id，再根据每个id去数据文件中去查询
+2. 相比非聚簇索引，当使用主键查询时少了一次查询数据的io
+3. 使用覆盖索引时可以直接查询结果无需二次查询
+
+聚簇索引确定
+
+1. 辅助索引需要二次查询，先查询主键，再根据主键查询数据
+2. 插入速度严重依赖于插入顺序。若主键为顺序的能命中缓存插入较快，若为非顺序的需要进行频繁io
+3. 更新主键时，成本高，需要更新主键索引和所有辅助索引
+4. 聚簇索引的插入比非聚簇索引的插入慢的多，因为要保证主键的唯一性，需要遍历所有的主键索引叶子节点，但聚簇索引叶子节点更大，需要更多次数的io
 
 ##### 4.2.2 主键索引
 
@@ -1235,13 +1207,37 @@ mysql> explain select * from index_combined where d = 12;
 1 row in set, 3 warnings (0.00 sec)
 ```
 
-#### 6.7 索引字段使用in或or索引失效
+#### 6.7 索引字段使用in或or索引可能失效
 
-当表中数据较少时，in或or选择的元素不多则使用索引；in或or选择的元素较多则全表扫描。但阙值未确定
+数据库本身会对做决策，决定时使用索引还是不适用索引更快
 
-当表中数据较多时（测试100W），in或or不管选择多少元素都使用索引
+```mysql
+# 表结构
+CREATE TABLE `data_large2` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `gid` int(11) DEFAULT NULL,
+  `address` varchar(20) DEFAULT NULL,
+  `uid` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uique_idx` (`uid`),
+  KEY `gid_idx` (`gid`)
+) ENGINE=InnoDB AUTO_INCREMENT=16372 DEFAULT CHARSET=utf8mb4
+# 表中数据，12288条。其中uid=id,gid=uid/100（约100种结果）
+# 情况1：主键索引。无论in多少数据，都使用了主键索引
+explain select * from data_large2 where id in (select id from data_large2 where id <= (select MAX(id) from data_large2) * 1);
+# 情况2：唯一索引。在比例小于等于0.18时使用索引，大于0.18不使用索引。0.18为测试值
+explain select * from data_large2 where uid in (select uid from data_large2 where uid <= (select MAX(uid) from data_large2) * 1);
+# 情况3：普通索引。和唯一索引一样
+explain select * from data_large2 where gid in (select gid from data_large2 where gid <= (select MAX(gid) from data_large2) * 1);
+```
 
-> 数据库本身会进行优化，若多值查询的数量足够多且表数据量不大时，全表扫描或许比查询索引更快
+结论：
+
+- 对于主键索引：in会使用索引
+- 对于非主键索引，是否走索引需要看数据区分度（当in集合数量小于总量的0.18倍时使用索引）
+- or可以看做和in一样
+
+> 数据库应该是模拟了使用索引和不使用索引时二者的耗时，选择一种耗时更少的方案去执行sql。
 
 ## 七、锁
 
@@ -1392,7 +1388,7 @@ InnoDB引擎默认使用临键锁，当出现下面情况会发送退化
 
 范围查询
 
-- 未命中记录，辅助索引加临键锁；主键索引加临键锁中记录对应id主键记录锁
+- 未命中记录，辅助索引加临键锁；辅助索引加临键锁中记录对应id加主键记录锁
 
 - 命中记录，包含where条件的区间，辅助索引加临键锁。主键索引命中记录id的索引项加记录锁
 
@@ -1731,7 +1727,7 @@ mysql> explain select * from (select * from tuser t1 union select * from tuser t
 
 ##### 2.2.4 type
 
-显示查询的连接类型或访问类型，下面性能依次从好到差
+显示查询的连接类型或访问类型，下面性能依次从高到低
 
 ```shell
 system>const>eq_ref>ref>fulltext>ref_or_null>unique_subquery>index_subquery>range>index_merge>index>all
@@ -1815,7 +1811,7 @@ int长度为4，tinyint长度为1
 
 ##### 2.3.1 索引创建优化
 
-- 复合最左匹配法则
+- 符合最左匹配法则
 - 当场用到多个字段查询时，尽量创建复合索引
 - 索引应查询的频率高，而更新的频率低
 - 索引尽可能地小，比如选择较小的数据类型，字符串选择前缀索引等
@@ -1953,7 +1949,7 @@ binlog日志记录分为三种模式
 
 5.7默认。该模式下记录因每条sql而发生变化的所有数据，slave复制时进行相同修改
 
-优点：slave复制时直接解析执行，无需关系上线文，不存在函数、存储过程、触发器的相关的一些复制失败问题
+优点：slave复制时直接解析执行，无需关心上下文，不存在函数、存储过程、触发器的相关的一些复制失败问题
 
 缺点：产生变更的数据可能会很多，磁盘io大
 
@@ -1970,6 +1966,18 @@ binlog日志记录分为三种模式
 ##### 1.2.3 查看binlog日志
 
 binlog是二进制日志，需要依赖mysqlbinlog查看
+
+```shell
+# --base64-output=DECODE-ROWS 显示row模式带来的sql变更
+# -d 指定数据库
+# --start-datetime=datetime 指定sql的最早时间
+# --stop-datetime=datetime 指定sql的最晚的时间
+# --start-position/--stop-position 指定文件中sql的序号范围
+# --offset=N 跳过前N个条目
+# binlog若为行模式，需要添加-vv
+mysqlbinlog --start-datetime='2018-07-10 00:00:00' --stop-datetime='2018-07-10 01:01:01' -d 库名 二进制文件
+sudo mysqlbinlog --base64-output=DECODE-ROWS  -vv -d test mysql-bin.000020 | tail -n 100
+```
 
 ```mysql
 ### SET
@@ -2280,7 +2288,7 @@ Step3：进入bin目录
 
 比如按照时间范围或ID区间切分。
 
-优点：逻辑清晰，能快速定位数据保存到哪个表里了；单表数量可空；水平扩展时只需要增加节点，无需对元数据进行重新分片
+优点：逻辑清晰，能快速定位数据保存到哪个表里了；单表数量可控；水平扩展时只需要增加节点，无需对元数据进行重新分片
 
 缺点：可能存在部分热点数据倒是数据分布不均匀，部分表的数据量压力可能比较大。
 
