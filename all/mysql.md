@@ -1174,7 +1174,7 @@ mysql> explain select * from index_combined where a is null;
 1 row in set, 1 warning (0.00 sec)
 ```
 
-is null能命中你索引
+is null能命中索引
 
 is not null不能命中索引
 
