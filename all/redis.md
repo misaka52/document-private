@@ -379,7 +379,7 @@ proxy可选择两种：Codis（豌豆荚）和Twemproxy（推特）
 - 客户端可以与任意一个redis机器直连，不需要任何的proxy
 - redis-cluster把16384个槽分配给各个节点，一个槽只能被一个节点监测
 
-**redis-clister投票：容错**
+**redis-cluster投票：容错**
 
 - **节点失效判断**：集群所有节点参与投票，当超过半数的master节点与该master节点连接失败，则判定该节点挂掉
 - **集群失效判断**

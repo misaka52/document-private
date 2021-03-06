@@ -44,15 +44,15 @@ ThreadLocal类，为每个线程都保存了一份独立的副本
 
 Fail-fast 及时失败，当发现容器在迭代过程中被修改，则抛出一个ConcurrentModificationException
 
-> 使用迭代器查询迭代查询list时，调用next()时会判断当前集合在迭代过程中是否被修改，若被修改过就抛ConcurrentModificationException
+> 使用迭代器查询迭代查询list时，调用next()时会判断当前集合在迭代过程中是否被修改，若modCount发生变更就抛ConcurrentModificationException
+>
+> modCount表示修改的次数，在增加和删除元素时会加一
 >
 > foreach的底层实现就是迭代器迭代。
 >
 > 那为何使用迭代器remove函数可以正常移除元素？remove函数对内置期望modCount做了修改，使得remove可以在迭代时使用不抛出异常
 >
 > list但凡设计到遍历元素的（toString, containAll, removeAll等），只要遍历过程中容器被修改了，就会抛出异常
-
-
 
 ## 第6章 任务执行
 
@@ -184,7 +184,7 @@ Thread Api的线程优先级只作为线程优先级的参考，根据线程优�
 
 **tryLock()**: 非公平性方式直接CAS获取锁，不关心等待顺序
 
-**lock()-非公平锁 **：直接CAS获取锁（若无锁状态直接获取锁），失败再非公平性尝试获取锁，再失败将自己加入到等待队列中，并时当前线程中断等待
+**lock()-非公平锁 **：直接CAS获取锁（若无锁状态直接获取锁），失败再非公平性尝试获取锁，再失败将自己加入到等待队列中，并将当前线程中断等待
 
 **lock()-公平锁 **：若当前锁处于未被获取状态且等待队列内有等待中的信息CAS获取锁，否则不获取。代码如下
 
@@ -220,7 +220,7 @@ synchronized也隐式支持重入，比如一个线程对一个变量同时加�
 
 读写锁，允许多个读操作同时进行，但仅允许一个写操作同时进行。常见实现类ReentrantReadWriteLock，性能要高于ReentrantLock
 
-ReentrantReadWriteLock只有ReadLock和WriteLock两个实例，但这两个实力持有的锁都是ReentrantReadWriteLock本身
+ReentrantReadWriteLock只有ReadLock和WriteLock两个实例，但这两个实例持有的锁都是ReentrantReadWriteLock本身
 
 WriteLock与类似于独占锁，但不同的是，写锁还需要判断读锁是否被占有
 
@@ -290,8 +290,6 @@ await(long timeout, TimeUnit unit): 超时等待，超过指定时间便放行
 
 reset: 重置屏障状态。具体实现为先破坏屏障，使得唤醒所有线程并抛出异常，再重新初始化屏障
 
-
-
 ## 第15章 原子变量与非阻塞同步机制
 
 锁和CAS性能比较，在线程量比较小时，CAS性能偏好；在线程量较大时，可能锁的性能更好，因为锁的过程会挂起，而CAS时无限的重试，消耗cpu资源
@@ -299,8 +297,6 @@ reset: 重置屏障状态。具体实现为先破坏屏障，使得唤醒所有�
 ## 第16章 Java内存模型
 
 在共享内存的多处理器体系架构中，每个处理器都拥有自己的缓存，并且定期与主内存进行协调
-
-
 
 ## JUC（java.util.concurrent）并发工具
 
@@ -312,7 +308,7 @@ reset: 重置屏障状态。具体实现为先破坏屏障，使得唤醒所有�
 
 ![img](https://user-gold-cdn.xitu.io/2019/4/6/169f29dca9416c8f?imageslim)
 
-concurrentHashMap分为多个segment，每个segment就继承自ReentrantLock，也相当于hashMap
+concurrentHashMap分为多个segment，每个segment就继承自ReentrantLock，也相当于一个hashMap
 
 扩容是针对每个segment来说的
 
