@@ -1,29 +1,31 @@
 ### HashMap
 
-只有在添加元素才会开始初始化表。
+存储键值对的数据结构，采用数组+链表+红黑树实现
 
-new HashMap<>(int) // 传入的为map容量。实际大小为实际容量*负载因子取整
+- new HashMap<>(int) // 传入的为map容量。实际大小为实际容量*负载因子取整
 
-链表长度大于8，链表转成红黑树。删除数据时，红黑树节点过少时转成链表（在[2,6]范围内，具体要看红黑树结构），或者在扩容rehash时新树节点小于等于6转成链表
+- 链表长度大于8，链表转成红黑树。删除数据时，红黑树节点过少时转成链表（在[2,6]范围内，具体要看红黑树结构），或者在扩容rehash时新树节点小于等于6转成链表
 
-默认遇到重复键值，value更新
+- 默认遇到重复键值，value更新
+- 在第一次添加元素时初始化哈希表
 
 jdk8相对于jdk7变化
 
 - 引入了红黑树，对于长链表查询效率更高
-- 在resize时，链表依然按照顺序分配，不再翻转分配（jdk7链表逆序分配，并发使用时可能产生死循环）
+- 在resize时，链表依然按照顺序分配，不再逆序分配（jdk7链表逆序分配，并发使用时可能产生死循环）
 
 ### LinkedHashMap
 
-继承自HashMap，同样也复用hashmap的数组+链表结构，只是新增了一条链表，来表示顺序。新增的节点都放到链表末尾
+继承自HashMap，同样也复用hashmap的数组+链表结构，只是新增了一条链表，来表示顺序。新增的节点都放到链表末尾，遍历时从链表头开始遍历，扫描至链表尾部
 
-accessOrder: true表示访问列表为访问数据，false表示列表为插入顺序
+accessOrder: true表示访问列表为访问数据，false表示列表为插入顺序。LinkedHashMap默认false，表示插入和更新的节点都迁移到链表末尾；当为true时，访问过的元素会迁移到链表末尾
 
 put() 使用hashMap put方法
 
-当表示访问顺序时，最新的访问的节点移至链表末尾
-
-遍历时，从链表头开始遍历
+```java
+// 16-容器容量；0.75f-负载因子；true-访问顺序accessOrder
+new LinkedHashMap<>(16, 0.75f, true);
+```
 
 ### ThreadLocal
 
@@ -73,8 +75,6 @@ ThreadLocalMap包含实体组数，key为ThreadLocal变量，value为需要存�
 **在使用完ThreadLocal后及时remove**
 
 ## JUC
-
-### Condition？
 
 ### ConcurrentHashMap
 
@@ -161,6 +161,295 @@ Jdk1.8相对于jdk1.7改动
 - 扩容时将任务拆分，使用多线程并发执行加快扩容
 - 获取map大小，引入计数器概念（CounterCell数组）直接无锁获取。而jdk1.7需要对所有段加锁
 
+### CopyOnWriteArrayList/CopyOnWriteArraySet
+
+线程安全list，读取迭代期间不需要对容器进行加锁或复制。
+
+对list修改时，先加锁，复制一个全新的不可变数组，加入新元素，list底层数组引用不变，因此该集合类适用于遍历远多于修改场景
+
+### ConcurrentLinkedQueue
+
+线程安全list，采用非阻塞的方法实现（CAS）。基于链接节点实现的一个无界安全队列，采用先进先出的方式
+
+高并发下性能最好的队列
+
+### ReentrantLock
+
+可重入锁，每次只能一个线程能获取锁。可重入性，获取锁的线程可多次获取，通过计数标记，完全释放锁时也必须要释放与加锁同样的次数
+
+当且仅当内置锁（synchronized）不能满足当前需求时，可以使用ReentrantLock
+
+默认新建非公平性锁，若传入参数true可选择公平性锁。
+
+**tryLock()**:  非公平性方式直接CAS获取锁，不关心等待顺序
+
+**lock()-非公平锁 **：直接CAS获取锁（若无锁状态直接获取锁），失败再非公平性尝试获取锁，再失败将自己加入到等待队列中，并将当前线程中断等待，返回
+
+**lock()-公平锁 **：若当前锁处于未被获取状态且等待队列内无等待中的任务，CAS获取锁；否则将任务添加到等待队列中，并将当前线程中断等待，返回
+
+```java
+protected final boolean tryAcquire(int acquires) {
+  final Thread current = Thread.currentThread();
+  int c = getState();
+  if (c == 0) {
+    if (!hasQueuedPredecessors() &&
+        compareAndSetState(0, acquires)) {
+      setExclusiveOwnerThread(current);
+      return true;
+    }
+  }
+  else if (current == getExclusiveOwnerThread()) {
+    int nextc = c + acquires;
+    if (nextc < 0)
+      throw new Error("Maximum lock count exceeded");
+    setState(nextc);
+    return true;
+  }
+  return false;
+}
+```
+
+公平锁为了保证获取锁的顺序，阻塞几率高，唤醒的消耗的性能高。而非公平锁可能不阻塞就可获取锁，阻塞几率较低，唤醒消耗的性能就低。非公平锁虽然降低了性能开销，但可能有线程处于一直等待获取锁的状态，造成“饥饿”现象
+
+当完全释放锁时，会唤醒等待队列中的第一个等待者，通知其获取锁
+
+synchronized也隐式支持重入，比如一个线程对一个变量同时加锁，不会阻塞
+
+### AbstractQueuedSynchronizer
+
+并发编程实现同步器的一个框架，基于FIFO实现（Reentrant中的lock继承自它）
+
+AQS（简称）中存在一个FIFO队列，存放阻塞的节点，节点状态如下
+
+- CANCELLD：因超时或中断被放入队列
+- CONDITION：表示该线程因不满足某个条件而被放入队列
+- SIGNAL：该线程需要被唤醒
+- PROPAGATE：传播，在共享模式下，当前节点release后，需要通知传播通知给后续节点
+
+模式：独占模式：只能一个线程独占资源，如ReentrantLock；共享模式，资源可被多个线程同时持有，如CountDownLatch
+
+```java
+// 获取锁
+public final void acquire(int arg) {
+    if (!tryAcquire(arg) &&
+        acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+        selfInterrupt();
+}
+```
+
+### StampedLock
+
+和读写锁类似。但是有以下不同
+
+- 当使用读锁时，可以通过乐观模式获取，先记录版本号，获取完成再对比版本号，若相同直接返回无需加锁；若失败则添加读锁。在读锁操作时性能上有提升
+- 读锁可以升级为写锁
+
+```java
+public class StampedLockTest {
+    private static StampedLock stampedLock = new StampedLock();
+    private int x;
+    private int y;
+
+    public void move(int x, int y) {
+        long stamp = stampedLock.writeLock();
+        try {
+            this.x = x;
+            this.y = y;
+        } finally {
+            stampedLock.unlockWrite(stamp);
+        }
+    }
+
+    public int get() {
+        // 记录版本号
+        long stamp = stampedLock.tryOptimisticRead();
+        int currentX = x;
+        int currentY = y;
+        if (!stampedLock.validate(stamp)) {
+            // 校验不通过尝试获取读锁
+            long tmp = stampedLock.readLock();
+            try {
+                currentX = x;
+                currentY = y;
+            } finally {
+                stampedLock.unlockRead(tmp);
+            }
+        }
+        return currentX * currentY;
+    }
+
+    // 读锁升级为写锁
+    public void moveIfAtOrigin(int newX, int newY) {
+        long stamp = stampedLock.readLock();
+        try {
+            while (x == 0 && y == 0) {
+                long stamp2 = stampedLock.tryConvertToWriteLock(stamp);
+                if (stamp2 != 0) {
+                    // 转换成功
+                    x = newX;
+                    y = newY;
+                    break;
+                } else {
+                    stampedLock.unlockRead(stamp);
+                    stamp = stampedLock.writeLock();
+                }
+            }
+        } finally {
+            stampedLock.unlock(stamp);
+        }
+    }
+}
+```
+
+特点
+
+- 所有获取锁的方法，都返回一个邮戳（stamp），为0表示获取失败，否则获取成功
+- 所有释放锁的方法，都需要一个邮戳，且必须和获取锁时得到的stamp一致
+- 不可重入，写锁不可重复获取
+- 支持读写锁之间的互相转换
+
+### wait和notify
+
+二者都是Object类的方法，都是针对对象调用的。wait使线程释放对象锁资源，进入等待态，等他其他线程唤醒。热点如下
+
+- 必须持有对象锁的情况下才能调用wait
+- 必须持有对象锁的情况下才能调用notify和notifyAll
+- 唤醒处于wait的线程后，仍需要获取锁才能继续执行
+
+### Condition
+
+condition提供了类似于Object的监听器接口，与Lock接口配合实现等待、通知模式。等待之后需要被唤醒。
+
+> 与wait和notify相比，Condition就是一个锁对象，不过是lock的，使用时先获取锁，然后直接wait或notify，避免synchronized
+
+await()等待：调用时线程处于阻塞状态，等待唤醒
+
+signal()：唤醒一个线程，将条件队列（Condition类中）头节点移动到同步队列中（AQS类中），状态设置为signal；若设置失败，直接调用唤醒的线程
+
+```java
+class TaskQueue {
+    private final Lock lock = new ReentrantLock();
+    private final Condition condition = lock.newCondition();
+    private Queue<String> queue = new LinkedList<>();
+
+    public void addTask(String s) {
+        lock.lock();
+        try {
+            queue.add(s);
+            condition.signalAll();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public String getTask() {
+        lock.lock();
+        try {
+            while (queue.isEmpty()) {
+                condition.await();
+            }
+            return queue.remove();
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+```
+
+### Semaphore
+
+信号量，一个控制多个共享资源的计数器。state表示剩余可获取的许可数
+
+```java
+public Semaphore(int permits) {
+    sync = new NonfairSync(permits);
+}
+
+public Semaphore(int permits, boolean fair) {
+    sync = fair ? new FairSync(permits) : new NonfairSync(permits);
+}
+```
+
+当信号量为1时，可被当作互斥锁使用。
+
+当信号量为0时，仍然可以release变成1，然后再获取
+
+acquire(): 获取锁，若获取不到则阻塞，直到取得锁为止
+
+release(): 释放锁，信号量加1。释放成功后唤醒等待队列中的线程，使得线程继续运行，尝试获得锁
+
+### CountDownLatch
+
+可拦截一组线程，判断该组线程是否执行完毕。只能使用一次
+
+```java
+static void countDownLatch() throws InterruptedException {
+        int count = 10;
+        CountDownLatch countDownLatch = new CountDownLatch(count);
+        for (int i = 0; i < count; ++i) {
+            new Thread() {
+                @SneakyThrows
+                @Override
+                public void run() {
+                Thread.sleep(ThreadLocalRandom.current().nextInt(1000));
+                System.out.println(Thread.currentThread().getName() + " ing");
+                countDownLatch.countDown();
+                countDownLatch.await();
+                System.out.println(Thread.currentThread().getName() + " finish");
+            }}.start();
+        }
+    }
+```
+
+### CyclicBarrier
+
+可循环使用的屏障，主要功能是拦截一组线程，当所有线程都到达屏障（计数器为0），唤醒所有等待线程
+
+await(): 一个线程到达屏障，屏障计数器减一。当屏障计数器不为0时，线程自旋调用wait；当屏障计数器为0时，唤醒所有等待的线程，并重置屏障
+
+await(long timeout, TimeUnit unit): 超时等待，超过指定时间便放行
+
+reset: 重置屏障状态。具体实现为先破坏屏障，使得唤醒所有线程并抛出异常，再重新初始化屏障
+
+```java
+static void cyclicBarrier() throws InterruptedException {
+        int count = 10;
+        CyclicBarrier barrier = new CyclicBarrier(count);
+
+        for (int i = 0; i < count; ++i) {
+            new Thread() {
+                @SneakyThrows
+                @Override
+                public void run() {
+                    Thread.sleep(ThreadLocalRandom.current().nextInt(1000));
+                    System.out.println(Thread.currentThread().getName() + " 正在写入数据");
+                    barrier.await();
+                    System.out.println(Thread.currentThread().getName() + " finish");
+                }
+            }.start();
+        }
+    }
+```
+
+和countDownLatch对比
+
+- 侧重点不同。CountDownLatch一般用于一个线程等待其他线程执行完毕再执行。而cyclicBarrier一般用于等待所有线程到达某个状态，再同时执行
+- 可以循环使用，countDownLatch只能使用一次
+
+### Exchanger
+
+用于两个线程之间交换数据，当一个线程提前执行exchanger后会等待第二个线程执行到exchanger，之后交换数据
+
+```java
+// thread-1
+int data = 1;
+data = exchanger.exchange(data);
+// thread-2
+int data2 = 2;
+data2 = exchanger.exchange(data2);
+// 交换后，数据对调
+```
+
 ## 线程池
 
 ### FixedThreadPool
@@ -198,10 +487,113 @@ SynchronousQueue：每个操作必须等待另一个线程的移除操作
 2. 当线程池中无空闲线程，则创建一个新线程，执行目标任务
 3. 线程执行完毕后，SynchronousQueue.poll(keeyAliveTime, TimeUnit.NANOSECONDS)。这个poll操作会让线程在SynchronousQueue中最多等待60s。若主线程提交了任务且与poll配对成功，取出线程执行；否则线程闲置超过60s，线程终止
 
-### ForkJoinPool？
+### ForkJoinPool
 
-forkJoin提供了两个子类
+forkJoinPool是jdk1.7引入的线程池，可以将一个任务拆成多个小任务，然后将多个小任务结果汇总（即join）。
+
+work-stealing：线程池分配了与线程数相等的队列，初始时任务平均分配。当有线程提前执行完队列中所有任务时，会随机从其他队列拉取任务执行
+
+常用方法：使用forkJoin框架，需要创建ForkJoinTask任务，然后通过fork和join的机制实现。ForkJoinTask有两个实现类
 
 - RecursiveAction：用于没有返回结果的任务
 - RecursiveTask：用于有返回结果的任务
+
+```java
+
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RecursiveTask;
+
+/**
+ * Created by TF016591 on 2017/11/8.
+ */
+public class CountTaskTmp extends RecursiveTask<Integer> {
+    private static final int THRESHOLD = 2;
+    private int start;
+    private int end;
+
+    public CountTaskTmp(int start, int end) {
+        this.start = start;
+        this.end = end;
+    }
+
+    //实现compute 方法来实现任务切分和计算
+    protected Integer compute() {
+        int sum = 0;
+        boolean canCompute = (end - start) <= THRESHOLD;
+        if (canCompute) {
+            for (int i = start; i <= end; i++)
+                sum += i;
+        } else {
+            //如果任务大于阀值，就分裂成两个子任务计算
+            int mid = (start + end) / 2;
+            CountTaskTmp leftTask = new CountTaskTmp(start, mid);
+            CountTaskTmp rightTask = new CountTaskTmp(mid + 1, end);
+
+            //执行子任务
+            leftTask.fork();
+            rightTask.fork();
+
+            //等待子任务执行完，并得到结果
+            int leftResult = (int) leftTask.join();
+            int rightResult = (int) rightTask.join();
+
+            sum = leftResult + rightResult;
+        }
+
+        return sum;
+    }
+
+    public static void main(String[] args) {
+        //使用ForkJoinPool来执行任务
+        ForkJoinPool forkJoinPool = new ForkJoinPool();
+
+        //生成一个计算资格，负责计算1+2+3+4
+        CountTaskTmp task = new CountTaskTmp(1, 4);
+
+        Integer r = forkJoinPool.invoke(task);
+        System.out.println(r);
+        //  或者可以这样写
+        //        Future<Integer> result = forkJoinPool.submit(task);
+        //        try {
+        //            System.out.println(result.get());
+        //        } catch (Exception e) {
+        //        }
+    }
+}
+```
+
+```java
+// ForkJoinPool默认线程数为cpu核数
+public ForkJoinPool() {
+        this(Math.min(MAX_CAP, Runtime.getRuntime().availableProcessors()),
+             defaultForkJoinWorkerThreadFactory, null, false);
+    }
+
+public ForkJoinPool(int parallelism,
+                        ForkJoinWorkerThreadFactory factory,
+                        UncaughtExceptionHandler handler,
+                        boolean asyncMode) {
+        this(checkParallelism(parallelism),
+             checkFactory(factory),
+             handler,
+             // asyncMode=true 先进先出；为false时后进先出
+             asyncMode ? FIFO_QUEUE : LIFO_QUEUE,
+             "ForkJoinPool-" + nextPoolId() + "-worker-");
+        checkPermission();
+    }
+```
+
+```java
+Executors.newWorkStealingPool();
+public static ExecutorService newWorkStealingPool() {
+        return new ForkJoinPool
+            (Runtime.getRuntime().availableProcessors(),
+             ForkJoinPool.defaultForkJoinWorkerThreadFactory,
+             null, true);
+    }
+```
+
+### ScheduleThreadPool
+
+可以延迟执行任务，或定时执行任务。和Timer类似，但ScheduleThreadPool功能更强大，更灵活，可以在构造函数中指定多个对应的后台线程
 

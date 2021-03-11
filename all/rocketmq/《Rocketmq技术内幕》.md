@@ -24,7 +24,7 @@
 
 消息生产者（Producer）发送消息给消费服务器（broker），消息服务器负责消息存储和转发，消息消费者通过消费服务器主动推送消息或主动拉取消息两种方式订阅消息
 
-其中，broker启动时向所有NameServer注册，建立长连接，每个30s检查broker是存活。producer通过nameserver获取broker列表信息，通过负载均衡算法选择一个broker发送消息。nameServer节点间无同步，且broker宕机后，nameServer会将其移除，但不会通知producer。
+其中，broker启动时向所有NameServer注册，建立长连接，每隔30s检查broker是否存活。producer通过nameserver获取broker列表信息，通过负载均衡算法选择一个broker发送消息。nameServer节点间无同步，且broker宕机后，nameServer会将其移除，但不会通知producer。
 
 ### 2.3 NameServer 路由注册、故障剔除
 
@@ -66,6 +66,12 @@ RokcetMq有两种情况出发路由删除
 RocketMQ发现路由不是实时的，当NameServer路由发生改变时，并不会通知客户端，而是通过客户端主动定时拉取最新配置来感知变化的。在发送消息时也会获取路由信息
 
 > 本章疑问： NameServer通过当broker无心跳超过120s才更新路由信息，当Broker失效之后且在移除废弃路由之前，producer请求获取到broker信息，此时就会发送失败，producer如何保证高可用？答:producer自带失败重试机制,下次重试会绕过上次失败的broker发送.另还有故障延时机制,对出现故障的broker临时标为不可用
+>
+> 失败重试机制：
+>
+> 1. 当发送消息发生指定异常时，直接重试，如：RemotingException，MQClientException，MQBrokerException；若为InterruptedException异常或其他未知类型异常，发送直接报错
+> 2. 在发送消息得到broker返回信息时，结果不为SEND_OK（其他错误刷盘超时、同步slave超时、slave不可用），且retryAnotherBrokerWhenNotStoreOK（默认false）为true时，自动重试。仅在SYNC模式下重试，ASYNC和ONEWAY模式下不重试
+> 3. retryTimesWhenSendFailed：默认2。失败后重试次数，即最多发送retryTimesWhenSendFailed+1次
 
 ## 三、RocketMQ消息发送
 
@@ -139,7 +145,7 @@ clientId={clientIp}@{instance}[@unitName]
 3. 各消息topic相同
 4. waitStoreMsgOK相同
 
-> 疑问，解压时对批量消息做特殊处理？
+> 疑问，解压时对批量消息做特殊处理？有
 
 ### Producer属性
 #### DefaultMQPushConsumerImpl
@@ -310,7 +316,7 @@ MappedFileQueue核心属性
 
 #### 4.5.2 Consumequeue
 
-为查询主题的消息（全部主题消息均保存在一套commitLog文件），设计了消息队列。消息队列的一级目录为topic，二级目录为消息队列。
+为查询主题的消息（全部主题消息均保存在一套commitLog文件），设计了消息队列。消息队列的一级目录为topic，二级目录为消息队列。文件名最初消息的偏移量，比如第一个文件满之后，第二个文件名为00...06000000，起始偏移量600W
 
 每个ConsumeQueue不会保存全量消息，仅保存 commitLog offset(8B，消息偏移量)+size(4B)+tag hashcode(8B)。每个消息20字节，每个文件固定30万个条目
 
@@ -326,13 +332,13 @@ ConsumeQueue类对应一个topic下一个队列，ConsumeQueue类中存在所有
 
 #### 4.5.3 IndexFile索引文件
 
-索引文件以时间戳为文件名
+索引文件以创建时时间戳为文件名
 
 索引文件分为 IndexHeader头部、500万个Hash槽（每个4字节）、2000万个Index条目列表（每条目20字节）。顺序存储
 
 **IndexHeader头部**：40字节。记录消息最小、最大存储时间，消息最小、最大偏移量。hashSlotCount：槽已使用个数；index条目已使用个数
 
-**Hash槽**：一个IndexFile包含500万个槽，每个槽存储落在该Hash槽的hashcode的index索引条目数量
+**Hash槽**：一个IndexFile包含500万个槽，每个槽存储落在该Hash槽的hashcode的index索引条目位置
 
 **Index条目列表**：默认一个索引文件2000万个条目，每个条目信息如下
 
@@ -344,6 +350,7 @@ ConsumeQueue类对应一个topic下一个队列，ConsumeQueue类中存在所有
 每增加一个index条目，就往index条目列表中顺序追加。IndexHeader通过indexCount记录当前已使用index条目数量。hash槽保存的是key（hashcode）对应index索引，出现hash冲突时保存最新index索引。通过preIndexNo追溯上一条冲突索引
 
 **1、插入key**
+
 > IndexFile#putKey(String key, long phyOffset/\*消息物理偏移量\*/, long storeTimestamp/\*消息保存时间\*/)
 1. 计算key的hashCode，获得槽位置（hashCode%槽总数），计算槽绝对位置absSlotPos=header大小 + 槽位置 * 槽大小
 2. 若mappedByteBuffer.get(absSlogPos)索引数小于0或大于最大值，初始化0
@@ -358,6 +365,7 @@ QueryMsgByKeySubCommand.queryByKey
 
 1. 遍历所有的broker，根据key，topic查询消息，每个broker查询一定数量（默认64）
 2. 查询时，遍历broker下所有的indexFile，查询对应key消息
+3. 对于每个indexFile查询，首先计算key的hashCode，定位hash槽是否存在数据；若存在则得到index条目位置，对比key，若匹配成功则记录下来，若存在hash冲突则继续匹配上一条目，通过preIndexNo
 
 
 #### 4.5.4 checkpoint文件
@@ -454,7 +462,7 @@ MQPushConsumer
 
 DefaultMQPushConsumer
 
-1. ?(已解惑)consumerFromWhere：设置消费起点策略。CONSUME_FROM_LAST_OFFSET，默认，获取消费者下队列最新消费偏移量，若该消费者第一次启动，则以消息队列下最新的消费偏移量为消费起点；CONSUME_FROM_FIRST_OFFSET，从队列最新偏移量开始消费，若消费者第一次启动，则从0开始消费；CONSUME_FROM_TIMESTAMP，从指定时间戳开始消费
+1. ?(已解惑)consumerFromWhere：设置消费起点策略。CONSUME_FROM_LAST_OFFSET，默认，非第一次启动使用上次的消费偏移量，第一次启动使用改消息队列的消费偏移量；CONSUME_FROM_FIRST_OFFSET，非第一次启动使用上次的消费偏移量，第一次启动使用0为消息偏移量；CONSUME_FROM_TIMESTAMP，从指定时间戳开始消费
 2. OffsetStore offsetStore 消息消费进度存储器
 3. consumeThreadMin（默认20），消费最小线程数
 4. consumeThreadMax（默认20），消费者最大线程数。消费者线程使用无界队列，故消费者线程最大为consumeThreadMin

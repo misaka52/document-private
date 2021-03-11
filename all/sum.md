@@ -197,9 +197,7 @@
 
 ## 并发编程的艺术
 
-### 1. java内层模型
-
-### 2. java底层实现
+### 1. java底层实现&内存模型
 
 1. 主内存与本地内存
 2. 指令重排序：编译器重排序，指令重排序，内存系统的重排序
@@ -208,6 +206,65 @@
 5. 锁内存的定义：获取锁使本地内存失效，释放锁将本地内存刷新到主内存
 6. happens-before关系：保证前一个操作的结果一定对后一个操作可见；不能保证两个操作的真正执行顺序
 7. 双重锁检查和延迟初始化（类初始化锁）
+8. JMM内存模型（即存在共享主内存，和线程私有的本地缓存）
+9. 重排序（编译器优化的重排序、指令的重排序、内存系统的重排序）
+10. final域内存语义
+11. Thread(start, run, sleep, wait, yield, join)及五种状态
+12. wait,notify,notifyAll
+13. 线程池：核心线程数，队列（数组有界队列、无界链表队列、阻塞队列），最大线程数，线程活动时间（即空闲后最大存活时间），拒绝策略
+14. 线程池任务类型（IO密集型，CPU密集型）
+15. Executor接口，ExecutorService接口，ThreadPoolExecutor线程池实现类，Runnable和Callable接口
+16. FixedThreadPool，SingleThreadPool，CachedThreadPool，ScheduleThreadPool
 
-? volatile变量总结
+### 2. 并发工具
+
+1. ReentrantLock，WriteReadLock，StampedLock
+2. notify，Condition
+3. CountDownLatch，CyclicBarrier，Semaphore，Exchanger
+4. juc：ConcurrentHashMap(jdk1.7和jdk1.8)，CopyOnWriteArrayList，ConcurrentLinkedQueue(CAS)
+5. 线程安全类：HashTable(java.util, synchronized all)，Vector(java.util, synchronized all)， StringBuffer(java.lang，synchronized all)
+6. ForkJoin
+7. sun.misc.Unsafe: 原子操作类，compareAndSwapObject
+8. 原子类：AtomicInteger，AtomicReference，AtomicStampedReference
+
+## rocketmq
+
+### 1. nameserver
+
+1. 实现简单，节点间不通信，单节点保存所有broker信息
+2. 路由元信息（topic路由队列信息、broker基础信息、broker集群信息、broker状态信息）
+3. 路由注册、路由删除（不通知producer，其自动感知）、路由发现
+
+### 2. producer
+
+1. 消息类型：同步消息、异步消息、单向消息
+2. 生产者clientId={clientIp}@{instanceName}[@unitName]，根据clientId分配队列
+3. 发送消息：消息检验、获取topic路由信息、选择消息队列、发送消息
+4. 故障延迟机制
+5. 批量消息发送（不支持延迟消息、每个批次最大1M，批次消息topic一致）
+
+### 3. 消息存储
+
+1. 存储文件：commitlog，consumequeue，index文件，checkpoint，abort
+2. 消息存储：若消息延迟等级大于0，产生定时消息，根据延迟等级保存到相应队列中
+3. MapperFile对应一个ConsumeQueue文件
+4. 文件过期清理机制：清理过期72小时的文件（按照文件最后更新时间算）
+5. MsgId(16B) = ip(4B)+port(4B)+offset(8B)，查询消息效率最高
+6. CommitLog记录：消息前4字节存储消息大小
+7. 根据消息偏移量查询消息：首先定位commitlog文件；再定位偏移量差定位消息起始位置；消息前四字节为消息大小
+8. ConsumeQueue：消息队列索引文件，按照topic和队列保存消息。单个消息体=offset(8B)+size(4B)+tag hashcode(8B)，每个消息20字节，每个consumeQueue固定30万条消息
+9. ConsumeQueue消息逻辑偏移量，即在文件中的消息逻辑顺序位置，从一开始。
+10. ConsumeQueue消息查询：根据逻辑偏移量查询；根据时间戳查询
+11. IndexFile：msg key索引文件。header+槽（4B\*500W）+索引条目（20*2000W，条目包含msg key、消息偏移量、与第一条消息时间存储差、上一条目位置）
+12. abort文件：判断broker是否正常关闭
+13. checkpoint文件：文件刷盘时间点
+14. 文件固定大小的好处：文件命名有规律，查询数据方便
+
+### 4. 消息消费
+
+1. 集群模式和广播模式
+2. push消费：通过循环拉取的机制。默认每次拉取完都立即进行下一次拉取（立即将任务放入任务队列中）
+3. 消息队列负载均衡：每隔20s进行rebalance
+4. 消息拉取消费过程：每个消费者客户端循环从任务队列中拉取任务，从broker端查询消息，返回给消费者；当消费失败时，将消息保存到重试消息队列中（%RETRY%{consumeGroup}，消费者自动订阅本组重试消息），设置延迟级别，先保存为定时消息后续延迟获取消费
+5. 定时消息：消息按照延迟等级选择队列保存在定时消息中，建立一个对应的延迟任务添加到队列中，等待执行。当执行到定时消息时，将消息topic和queueId还原，发送到对应的消息队列中，保存到commitlog，等待消费者拉取
 
