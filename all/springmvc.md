@@ -73,11 +73,11 @@ SpringMVC是一种基于MVC设计模式的请求驱动类型的轻量级web框�
 
 #### 5.视图解析器ViewResolve
 
-接收前端控制器传入的ModelAndView，将其解析成View返回
+接收前端控制器传入的ModelAndView，将其解析成View，填充数据，返回。默认InternalResourceViewResolver类
 
 #### 6.视图渲染器
 
-将视图美化渲染，返回
+将视图美化渲染，返回。视图解析器中自带，大部分视图解析器中都没有视图渲染器
 
 #### mvc流程处理
 
@@ -90,8 +90,7 @@ SpringMVC是一种基于MVC设计模式的请求驱动类型的轻量级web框�
 7. HandlerAdapter将Handler执行结果ModelAndView返回到DispatcherServlet
 8. 拦截器后置处理
 9. DispatcherServlet将ModelAndView传给ViewReslover视图解析器(多个)解析，解析成View（生成页面）
-10. ViewReslover解析后返回具体View
-11. DispatcherServlet对View进行渲染视图（即将模型数据model填充到视图中）
+11. 视图渲染器对View进行渲染视图（视图美化）
 12. DispatcherServlet返回给客户端
 
 # 项目搭建
@@ -275,7 +274,7 @@ void service(HttpServletRequest request,HttpServletResponse response){}
 request.getRequestDispatcher("页面路径").forward(request, response);
 // 2.通过response重定向
 response.sendRedirect("url")
-// 3. 通过response指定返回结果
+// 3.通过response指定返回结果
 response.setCharacterEncoding("utf-8");
 response.setContentType("application/json;charset=utf-8");
 response.getWriter().write("json串");
@@ -378,9 +377,7 @@ Converter配置
 <!-- 加载注解驱动 -->
 <mvc:annotation-driven conversion-service="conversionService"/>
 <!-- 转换器配置 -->
-<bean id="conversionService"
-class="org.springframework.format.support.FormattingConversionServiceFactoryBean
-">
+<bean id="conversionService" class="org.springframework.format.support.FormattingConversionServiceFactoryBean">
 <property name="converters">
 <set>
 <bean class="com.kkb.ssm.controller.converter.DateConverter"/>
@@ -567,10 +564,13 @@ springmvc的拦截器interceptor实现对每一个请求处理前后进行相关
 
 请求头中增加字段origin
 
+- Origin: 请求必须，表示请求源地址信息。协议+域名+端口
+
 响应头中包含
 
-- Access-Control-Allow-Origin：必须。表示允许的域，可以使用*通配方式
-- Access-Control-Allow-Credentials: 可选，表示是否允许发送跨域cookie
+- Access-Control-Allow-Origin：必须，服务器返回，要么是请求时origin的值，要么是*，表示接收任何域名的的请求
+- Access-Control-Allow-Credentials: 服务器返回可选，表示服务端是否允许跨域发送cookie，默认cookie不在跨越请求中。即使服务器跨越支持cookie，请求段也需要在ajax请求中设置withCredentials=true属性，否则浏览器发送不会携带cookie。另外要发送cookie，Access-Control-Allow-Origin就不能配置*而需要设置具体地址
+- Access-Control-Expose-Headers：可选。cors跨越请求时，XMLHttpRequest的getResponseHeader()`方法只能拿到6个基本字段：`Cache-Control`、`Content-Language`、`Content-Type`、`Expires`、`Last-Modified`、`Pragma。如果想拿到更多字段，就必须在Access-Control-Expose-Headers中指定
 
 #### 非简单请求
 
@@ -581,9 +581,45 @@ springmvc的拦截器interceptor实现对每一个请求处理前后进行相关
 预检请求的请求方式为OPTIONS，主要包含以下特殊字段
 
 - Access-Control-Request-Method：必须。表示cors请求会用到哪些方法
+
 - Access-Control-Request-Headers：表示会额外发送的头信息
 
-若通过预检请求，以后每次请求都像简单请求一样
+服务器收到预检请求后，检查origin、Access-Control-Request-Method和Access-control-request-header字段后，确认允许跨越，便可做出响应
+
+```
+OPTIONS /cors HTTP/1.1
+Origin: http://api.bob.com
+Access-Control-Request-Method: PUT
+Access-Control-Request-Headers: X-Custom-Header
+Host: api.alice.com
+Accept-Language: en-US
+Connection: keep-alive
+User-Agent: Mozilla/5.0...
+```
+
+**预检请求的回应**
+
+- Access-Control-Allow-Methods：必须，服务器返回。表示服务器支持的所有跨越方法
+- Access-Control-Allow-Headers：服务器返回。如果浏览器请求包含Access-Control-Request-Headers字段，则Access-Control-Allow-Headers是必须的，表示服务器所支持的所有头信息
+- Access-Control-Max-Age：服务器可选。用来指定本次预检的有效期
+- Access-Control-Allow-Credentials：与简单请求含义一致
+
+```
+HTTP/1.1 200 OK
+Date: Mon, 01 Dec 2008 01:15:39 GMT
+Server: Apache/2.0.61 (Unix)
+Access-Control-Allow-Origin: http://api.bob.com
+Access-Control-Allow-Methods: GET, POST, PUT
+Access-Control-Allow-Headers: X-Custom-Header
+Content-Type: text/html; charset=utf-8
+Content-Encoding: gzip
+Content-Length: 0
+Keep-Alive: timeout=2, max=100
+Connection: Keep-Alive
+Content-Type: text/plain
+```
+
+**若通过预检请求，以后每次CORS请求都像简单请求一样，浏览器自动为请求添加origin**
 
 ### 服务端跨域实现
 
@@ -599,11 +635,13 @@ springmvc4.x以上可以通过注解@CrossOrigin解决跨域，可以作用域�
 </mvc:cors>
 ```
 
+
+
 ## 父子容器
 
 ![img](../image/738818-20190617214214614-761905677.png)
 
-上图展示了两个ApplicationContext，
+上图展示了两个ApplicationContext
 
 - Servlet WebApplicationContext：对J2EE三层架构中的web层进行配置，如控制（controller），视图解析器（viewResolver）。通过springmvc中的DispatcherServlet加载配置
 - Root WebApplicationContext：对J2EE三层架构中业务层和持久层进行配置。一般通过ContextLoaderListener来加载。

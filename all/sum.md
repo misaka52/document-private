@@ -263,8 +263,51 @@
 ### 4. 消息消费
 
 1. 集群模式和广播模式
-2. push消费：通过循环拉取的机制。默认每次拉取完都立即进行下一次拉取（立即将任务放入任务队列中）
-3. 消息队列负载均衡：每隔20s进行rebalance
-4. 消息拉取消费过程：每个消费者客户端循环从任务队列中拉取任务，从broker端查询消息，返回给消费者；当消费失败时，将消息保存到重试消息队列中（%RETRY%{consumeGroup}，消费者自动订阅本组重试消息），设置延迟级别，先保存为定时消息后续延迟获取消费
-5. 定时消息：消息按照延迟等级选择队列保存在定时消息中，建立一个对应的延迟任务添加到队列中，等待执行。当执行到定时消息时，将消息topic和queueId还原，发送到对应的消息队列中，保存到commitlog，等待消费者拉取
+2. 消费者启动：消息订阅（主动订阅的消息、消费者组重试消息）；初始化instance和rebalance信息等；
+3. consumerFromWhere：查询到历史偏移量则按照历史开始消费；查询不到按照配置默认选择消费点；
+4. CONSUMER_FROM_LAST_OFFSET(新消费者从队列最大偏移量开始消费，若为新topic则从头开始消费), CONSUMER_FROM_FIRST_OFFSET(新消费者从队列最小偏移量开始消费)
+5. push消费：通过循环拉取的机制。默认每次拉取完都立即进行下一次拉取（立即将任务放入任务队列中）
+6. 负载均衡：RebalanceService每隔20s向对所有主题的消费者和队列进行重新分配
+7. 消息拉取消费过程：每个消费者客户端循环从任务队列中拉取任务，从broker端查询消息，返回给消费者；当消费失败时，将消息保存到重试消息队列中（%RETRY%{consumeGroup}，消费者自动订阅本组重试消息），设置延迟级别，先保存为定时消息后续延迟获取消费
+8. 消费进度管理：广播模式保存在本地；集群模式保存到broker端；保存consumequeue文件逻辑偏移量
+9. 定时消息：消息按照延迟等级选择队列保存在定时消息中，每个定时消息队列都有一个任务负责拉取任务。当执行任务拉取到定时消息时，判断消息执行或延迟，若执行直接将消息topic和queueId还原，发送到对应的消息队列中，保存到commitlog，等待消费者拉取
+10. 事务消息：发送prepare消息；执行本地事务；事务提交则删除prepare消息，还原原消息发送；事务回滚则删除prepare消息；系统定时（每一分钟一次）查询prepare消息，回查事务状态，决定提交或回滚，最大回查15次；prepare消息删除只是把消息转发到另一个消息中存储，记录回滚或提交消息
+
+## spring
+
+1. 优点：方便解耦，简化开发；提供声明式事务支持；对aop变成的支持；集成各种框架
+2. bean标签；bean初始化的三种方式（配置bean标签、静态工厂、实例工厂）
+3. @Autowired：通过类型注入；默认不能为空；spring自带；结合@Qualifier实现结合实例查询
+4. @Resource：未指定名称或类型时先通过名称查找，未找到再通过类型查找；指定了只能按照指定类型查找；jdk自带
+5. @Inject：和@Autowired类型，结合@Name实现根据名称查找；jdk自带
+6. spring管理类：@Component, @Service, @Controller, @Configuration, @Bean
+7. @Import：引入其他配置类
+8. @PropertySource：引入配置文件，无法识别yml配置文件
+9. AOP：面向切面编程，在不修改的类源码的情况下，增强类的功能。比如权限校验、性能监控、日志记录、缓存
+10. spring aop：基于动态代理实现，分别有jdk动态代理（类必须实现接口）和cglib动态代理（基于目标类生成目标类的子类作为代理类）
+11. 通知类型：before，afterReturing，afterThrowing，after，around
+12. 事务传播行为：（默认）若外层存在事务则复用外层事务，若外层无事务则新建事务
+13. spring源码解析：先解析spring的xml配置文件，生成对应的beanDefinition；创建bean
+14. 创建bean：生成bean对象；属性依赖注入（注入所有依赖属性）；bean对象初始化
+15. 循环依赖：构造器注入无法解决；域注入spring通过提前暴露对象来解决
+16. 构造器注入优势：域不可变；保证域不为空；保证实例的完整性
+
+## springmvc
+
+1. MVC：模型、视图、控制器
+2. MVC流程：1 前端控制器接收请求；2 调用处理器映射器根据url获取处理器执行链；3 获取处理器适配器，调用处理器前置操作：参数封装、数据类型转换、数据验证等；4 拦截器前置处理；5 处理器处理，获取ModelAndView，返回给前端控制器；6 拦截器后置处理；7 前端控制器调用视图解析器，获得view；8 对view进行渲染（美化渲染，填充数据），返回给客户端
+3. 返回值处理：ModelAndView、void、String（视图名、重定向、转发）
+4. 跨越：浏览器因为安全问题，配置了同源策略，不允许协议、域名、端口不同的不同的源直接访问。出现在前端调用。
+5. 跨越问题解决：绕过AJAX请求；基于jquery的jsonp方式，只支持get请求；基于cors方式，支持get和post等
+6. CORS跨越：请求头注入origin，服务端向响应头注入Access-control-allow-origin。分为简单请求和非简单请求（增加OPTION预检请求）
+7. 父子容器：Root webApplicationContext容器为Servlet WebApplicationContext的父容器
+8. bean初始化：实现initializingBean接口，效率更高；通过反射调用init-method方法初始化
+
+## springboot
+
+1. 事务：配置类增加@EnableTransactionManagement；类或方法上添加@Transactional
+2. 拦截器：实现HandlerInterceptor
+3. 层级：tomcat-filter-servlet-interceptor-controller
+4. 过滤器和拦截器的区别：过滤器是servlet的，拦截所有资源，包括静态资源；拦截器是spring的，拦截所有请求，可以获取bean，基于反射实现
+5. start包自动加载：springboot启动类自带注解@SpringBootApplication，内包含注解@EnableAutoConfiguration，注解实现自动扫描所有jar包下META-INF/spring.factories文件，扫描文件中key为org.springframework.boot.autoconfigure.EnableAutoConfiguration的所有值，扫描所有AutoConfiguration类，把生效的bean载入到spring容器中
 

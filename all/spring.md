@@ -19,7 +19,7 @@ Spring是一个分层的Java SE/EE full-stack 轻量级开源框架。官网地�
 3. 声明式事务的支持
 4. 集成各种框架。比如Junit、Struts、Hibernate、Hessian等
 
-优点
+ 优点
 
 1. 低侵入式设计，代码污染低
 2. 独立于各种应用服务器，基于Spring应用框架的应用，可真正实现一次编译到处运行的承诺
@@ -32,8 +32,8 @@ Spring是一个分层的Java SE/EE full-stack 轻量级开源框架。官网地�
 ### Spring核心概念
 
 - Spring容器：指的就是IOC容器，底层实现是一个BeanFactory
-- IOC：Inverse Of Control，控制反转，将对象的控制全交给Spring容器
-- DI：Dependency Inject，依赖注入，Spring通过通过依赖注入的方式将对象注入到bean组件中。属于控制反转的一种方法
+- IOC：Inverse Of Control，控制反转，将对象的控制权交给Spring容器
+- DI：Dependency Inject，依赖注入，Spring通过依赖注入的方式将对象注入到bean组件中。属于控制反转的一种方法
 - AOP：Aspect Oriented Programing 面向切面编程，在不修改目标对象源代码的基础上，增加Ioc容器中bean的功能
 
 ## 核心基础
@@ -206,7 +206,7 @@ private Map<String, String> map;
 
 ##### @Scope
 
-限定类作用返回，同xml中 scope
+限定类作用返回，同xml中scope
 
 ##### 生命周期相关注解
 
@@ -222,7 +222,7 @@ private Map<String, String> map;
 
 #### @Configuration
 
-相当于xml中的配置文件。同@Component注解
+相当于xml中的配置文件。内部自带@Component注解
 
 #### @Bean
 
@@ -716,7 +716,7 @@ TransactionInterceptor
 **2）循环依赖的分类**
 
 - 构造器的循环依赖。无法自动解决，spring会抛出BeanCurrentlyInCreationException
-- setter方法的循环依赖。spring可以自动解决，采用提前暴露对象的方法。在实例化对象之后，依赖注入之前，将本身保存在DefaultSingletonBeanRegistry中，以供依赖注入时注
+- setter方法的循环依赖。spring可以自动解决，采用提前暴露对象的方法。在实例化对象之后，依赖注入之前，将本身保存在DefaultSingletonBeanRegistry中，以供依赖注入时注入
 
 **3）如何检测循环依赖**
 

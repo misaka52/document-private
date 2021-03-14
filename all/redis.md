@@ -755,7 +755,38 @@ lua -i # 进入交互式编程页面
 
 #### 8.2 数据类型
 
-- nil ：只有nil值属于该类，用于表达式时为0
+- nil ：空。只有nil值属于该类，用于表达式时为0
+- boolean：布尔值
+- number：数字
+- string：字符串
+- table：表，是lua中独有的数据类型，即是数组又可以是HashMap（字典）
+
+```lua
+-- 数组数据不区分类型，子元素可以是任意类型
+>local table1 = {'zhangsan', 'lisi', 1}
+>print(table1[1])
+zhangsan
+>print(table3[3])
+1
+
+-- 字典和数组混用
+>local table2 = {'zhangsan', 'lisi', name='wangwu'}
+>print(table2[1])
+zhangsan
+>print(table2['name'])
+wangwu
+```
+
+#### 8.3 变量类型
+
+```lua
+-- 全局变量
+name='zhangsan'
+-- 局部变量
+local age=12
+```
+
+基本使用
 
 ```lua
 print(type("hello world"))  -->string
@@ -774,16 +805,88 @@ str = "hello"
 print(#str) -- 5, #获取变量长度
 ```
 
+#### 8.4 EVAL命令
+
+redis中可以通过eval命名来支持执行lua脚本
+
+```lua
+eval luascript numkeys key [key ...] arg [arg ...]
+```
+
+- eval：关键字
+- luascript：lua脚本
+- numkeys：传入脚本的参数个数
+- key [key ...]：传入脚本的键信息，脚本中通过KEYS[index]获取对应值，1<=index<=numkeys。KEYS大小写敏感
+- Arg [arg ...]：传入脚本的附加参数。脚本中通过ARGV[index]获取对应值，1<=index<=numkeys。ARGV大小写敏感
+
+```lua
+set h1 v1
+set h2 v2
+
+127.0.0.1:6379> eval "return redis.call('GET', KEYS[1])" 1 h1
+"v1"
+127.0.0.1:6379> eval "return redis.call('GET', ARGV[2])" 2 1 2 h1 h2
+"v2"
+```
+
 **Redis.call()**  返回值就是redis执行的返回值，如果出错了，停止执行
 
-**redis.pcall()** 返回值是redis执行的返回值，如果出错了，就错误信息继续执行
+**redis.pcall()** 返回值是redis执行的返回值，如果出错了，继续执行，并将错误信息记录到table中
 
-**Eval** redis中运行lua脚本
+**通过redis命名执行lua脚本文件**
 
-```shell
-# redis中运行lua脚本
-> eval "return redis.call('set', KEYS[1], KEYS[2])" 2 foo val
+redis-cli --eval file key1 key2 , arg1 arg2
+
+逗号前后有空格
+
+```sh
+➜  lua cat lua1.lua
+return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}
+➜  lua redis-cli --eval lua1.lua a b , 1 2
+1) "a"
+2) "b"
+3) "1"
+4) "2"
 ```
+
+#### 8.5 原子性
+
+lua脚本在redis中是原子的，在命令执行完返回之前，redis会阻塞其他命令
+
+#### 8.6 脚本管理
+
+**SCRIPT LOAD**
+
+缓存常用脚本
+
+```lua
+127.0.0.1:6379> script load "return 'k1'"
+"4a3c266d6d9e6bdc8aa44fdad301f65813aa2d50"
+127.0.0.1:6379> evalsha 4a3c266d6d9e6bdc8aa44fdad301f65813aa2d50
+(error) ERR wrong number of arguments for 'evalsha' command
+127.0.0.1:6379> evalsha 4a3c266d6d9e6bdc8aa44fdad301f65813aa2d50 0
+"k1"
+```
+
+**script flush**：清除脚本缓存
+
+**script exists**：查看缓存脚本是否存在，可匹配多个。1-存在
+
+```lua
+127.0.0.1:6379> script exists 4a3c266d6d9e6bdc8aa44fdad301f65813aa2d50 123123A
+1) (integer) 1
+2) (integer) 0
+```
+
+**script kill**：终止正在执行的脚本，单位数据的完整性不一定执行成功。当lua脚本一部分逻辑已经写入时，script kill失效，需要执行shutdown nosave在不对数据进行持久化的情况下终止服务器来完成终止脚本
+
+#### 8.7 其他
+
+- 当lua脚本发生异常时，不会回滚已执行的逻辑
+- 尽量不适用lua提供具有随机性的函数
+- lua脚本中不要编写function函数，整个脚本作为一个函数的函数体
+- 脚本中变量都设置为局部变量
+- 在集群中使用lua脚本时保证所有key分配在相同机器，即统一查找slot，可采用redis hash tag技术
 
 ### 9. 布隆过滤器
 
@@ -826,6 +929,20 @@ redis客户端在springboot1.5.x默认Jedis实现，在springboot2.x默认lettuc
 实现了分布式和可扩展的java数据结构，支持布隆过滤器，分布式锁，分布式集合等。适用于分布式开发
 
 基于netty框架的事件驱动的通信层， 其方法调用可以是异步的，api线程安全，共享连接
+
+### 11. 其他指令
+
+#### 11.1 setnx
+
+setnx key value
+
+当key不存在时设置
+
+#### 11.2 setex
+
+setex key second value
+
+设置key，同时添加过期时间second
 
 ## 四、面试题
 
@@ -878,4 +995,8 @@ redis客户端在springboot1.5.x默认Jedis实现，在springboot2.x默认lettuc
 14. mongodb与redis对比
 
     1. mongo也是内存非关系型数据库，会使用虚拟内存，所有的操作通过mmap的方式映射到内存中，避免了零碎的磁盘操作。然后mmap的内存刷新到磁盘中。当物理内存够用是，性能：redis>mongodb>mysql
+    
+15. Setnx：当key不存在时设置
+
+16. Setex
 

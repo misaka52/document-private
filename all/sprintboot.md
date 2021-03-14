@@ -106,7 +106,7 @@ value表示环境，只在指定环境下才生效的类
 ```yml
 spring:
 	profiles:
-		active: true
+		active: dev
         
 ---
 spring:
@@ -339,14 +339,14 @@ public class IndexController {
 
 **@ConditionalOnMissingBean**
 
-当bean确实时生效
+当bean缺失时生效
 
 **@ConditionalOnProperty**
 
 当属性满足条件后生效
 
 - value：指定属性名
-- matchIfMissing：当属性缺失时匹配结果，默认falise
+- matchIfMissing：当属性缺失时匹配结果，默认false
 - havingValue：指定匹配值，当属性为该值时匹配结果为true。默认""，当不指定该属性时，匹配结果一定为true
 
 **@Import**
@@ -444,6 +444,8 @@ com.ysc.exercise.WrapAutoConfiguration2
 - 注册器：@Import中指定的类一般以Register结尾，且该类实现了接口，用于导入注册器。该类可以在代码运行时动态注册指定类的实例
 
 starter加载
+
+spring内部自带注解@EnableAutoConfiguration，注解实现扫描所有jar包下META-INF/spring.factories文件下所有自动注入的bean，加载到IOC容器中
 
 1. 启动类注解@SpringBootApplication中携带注解@EnableAutoConfiguration，具体选择器AutoConfigurationImportSelector
 2. AutoConfigurationImportSelector.getAutoConfigurationEntry -> getCandidateConfigurations() -> loadFactoryNames() -> loadSpringFactories()

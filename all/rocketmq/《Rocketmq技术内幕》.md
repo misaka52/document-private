@@ -4,6 +4,18 @@
 
 ## 一、基础
 
+### 1.2 Rocket源码目录结构
+
+目录说明
+
+- broker：broker模块
+- client：消息客户端，包括消息生产者、消息消费者
+- dev：开发者信息
+- distribution：部署实例文件夹
+- namesrv：nameserver实现相关类
+- srvutil：服务器工具类
+- store：消息存储相关类
+
 ### 1.3RocketMq设计理念
 
 #### 1.3.1 设计优势(追求简单和性能)
@@ -462,16 +474,28 @@ MQPushConsumer
 
 DefaultMQPushConsumer
 
-1. ?(已解惑)consumerFromWhere：设置消费起点策略。CONSUME_FROM_LAST_OFFSET，默认，非第一次启动使用上次的消费偏移量，第一次启动使用改消息队列的消费偏移量；CONSUME_FROM_FIRST_OFFSET，非第一次启动使用上次的消费偏移量，第一次启动使用0为消息偏移量；CONSUME_FROM_TIMESTAMP，从指定时间戳开始消费
+1. ?(已解惑)consumerFromWhere：当拉取不到消费进度时，设置消费起点策略。CONSUME_FROM_LAST_OFFSET，默认，从队列最大偏移量开始消费；CONSUME_FROM_FIRST_OFFSET，从队列最小偏移量开始消费；CONSUME_FROM_TIMESTAMP，从消费者启动时间戳开始消费
+
+   > 对于配置了CONSUME_FROM_LAST_OFFSET，正常情况下，新的订阅关系会从队列最大偏移量开始消费；如果topic还比较新，其体现在topic第一条消息所在的commitlog还没被清理过，且topic的第一个索引文件也没被清理过，rocketmq会认定该topic消息量不大，从头开始消费
+
 2. OffsetStore offsetStore 消息消费进度存储器
+
 3. consumeThreadMin（默认20），消费最小线程数
+
 4. consumeThreadMax（默认20），消费者最大线程数。消费者线程使用无界队列，故消费者线程最大为consumeThreadMin
+
 5. consumeConcurrentlyMaxSpan(默认20)，并发消息消费者的最大跨度，当消息队列中的消息的最大偏移量大于消息最小偏移量consumeConcurrentlyMaxSpan，则停止50ms再拉取消息
+
 6. ?pullThresholdForQueue：默认1000，默认每1000次打印流控日志。（配置1没什么效果）
+
 7. pullInterval=0，推模式下下次拉取间隔时间。默认拉取任务完成直接进行下一个拉取任务
+
 8. pullBatchSize(默认32)：每次消息拉取所拉取的条数
+
 9. consumeMessageBatchMaxSize(默认1)：每次消费时消息的最大条数，即传入Listener中的最大消息数量。（不足consumeMessageBatchMaxSize时直接拉取）
+
 10. suspendCurrentQueueTimeMillis(默认1s)：延迟将该消息提交到消费者线程的等待时间
+
 11. consumeTimeout(默认15分)：消息消费超时时间
 
 ### 5.3 消费者启动流程
@@ -632,7 +656,7 @@ if (null == findBrokerResult) {
 }
 ```
 
-上述步骤完成后，通过mQClientFactory.getMQClientAPIImpl().pullMessage() 异步拉取消息
+上述步骤完成后，通过MQClientFactory.getMQClientAPIImpl().pullMessage() 异步拉取消息
 
 **消息服务broker查询并组装消息**
 
@@ -654,7 +678,7 @@ RebalanceService线程每隔20s就会对所有的主题进行队列重新分配�
 
 由于每次进行重新负载时，broker都会实时查询消费者组下所有消费者，为消息队列、消费者列表排序，从而新的消费者也能分配到消息队列，消费消息
 
-![image-20201219191727861](/Users/ysc/Library/Application Support/typora-user-images/image-20201219191727861.png)
+![image-20201219191727861](../../image/image-20201219191727861.png)
 
 RebalanceService线程默认每隔20s执行一次mqClientFactory.doRebalance()方法。每个DefaultMQPushConsumerImpl都持有一个RebalanceImpl对象。doRebalance方法会对每个主题的消息队列进行重新负载，下面分析对单个主题如何进行负载均衡
 
@@ -687,7 +711,7 @@ step2： 首先对cidAll，mqAll排序，再进行分配算法
 
 **1. Consumer端心跳包发送**
 
-consumer启动后，回想RocketMQ集群中的所有broker建立连接，发送心跳包。broker收到心跳信息后，将consumer信息维护在ConsumerManager的本地缓存consumerTable中。负载均衡时遍历consumerTable，进行负载
+consumer启动后，会向RocketMQ集群中的所有broker建立连接，发送心跳包。broker收到心跳信息后，将consumer信息维护在ConsumerManager的本地缓存consumerTable中。负载均衡时遍历consumerTable，进行负载
 
 **2.Consumer端负载均衡实现类-RebalanceImpl**
 
@@ -1174,7 +1198,7 @@ Master服务端HA连接对象的封装
 2. 执行本地事务，返回执行结果
 3. 若事务执行结果为提交，则将prepare消息删除，还原消息，保存到CommitLog中
 4. 若事务执行结果为回滚，删除prepare消息
-5. 若职务执行结果为未知，不做任何操作
+5. 若事务执行结果为未知，不做任何操作
 6. 系统会定时查询prepare消息和已处理消息，判断是否需要回查本地事务。默认每隔一分钟查询一次，超过最大回查次数则回滚该消息。回查任务结果也分为提交、回滚、未知。若prepare回查超过最大次数则回滚该消息
 
 > 将prepare消息删除：不是真正的删除，而是新建一个RMQ_SYS_TRANS_OP_HALF_TOPIC消息并保存到CommitLog中，该主题表示的是已被提交或回滚的消息
