@@ -1738,6 +1738,88 @@ MySQL默认会主动探知死锁，回滚较小的事务，等待其他事务完
 >
 > 数据直接通过资源占用来判断死锁，无需等待获取锁超时。回滚小较小的事务（事务大小有插入、更新、删除的行数决定），回滚事务抛出如上错误。其他事务执行成功
 
+#### 8.4 死锁实战排查
+
+**开启innodb状态监控**
+
+```sql
+# 开启标准监控
+set global innodb_status_output=ON;
+# 开启锁监控
+set global innodb_status_output_locks=ON;
+```
+
+##### 1. show engine innodb status
+
+**事务模块日志**
+
+```sql
+------------
+TRANSACTIONS
+------------
+Trx id counter 23103
+Purge done for trx's n:o < 23090 undo n:o < 0 state: running but idle
+History list length 13
+LIST OF TRANSACTIONS FOR EACH SESSION:
+---TRANSACTION 422168728399424, not started
+0 lock struct(s), heap size 1136, 0 row lock(s)
+---TRANSACTION 422168728397616, not started
+0 lock struct(s), heap size 1136, 0 row lock(s)
+---TRANSACTION 23102, ACTIVE 193 sec
+4 lock struct(s), heap size 1136, 3 row lock(s), undo log entries 1
+MySQL thread id 5, OS thread handle 123145373093888, query id 822 localhost root
+TABLE LOCK table `test`.`user` trx id 23102 lock mode IX
+RECORD LOCKS space id 73 page no 3 n bits 80 index PRIMARY of table `test`.`user` trx id 23102 lock_mode X locks gap before rec
+Record lock, heap no 9 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000004; asc     ;;
+ 1: len 6; hex 00000000560c; asc     V ;;
+ 2: len 7; hex 2c00000b900ab6; asc ,      ;;
+ 3: len 4; hex 80000004; asc     ;;
+ 4: len 3; hex 342d74; asc 4-t;;
+
+RECORD LOCKS space id 73 page no 3 n bits 80 index PRIMARY of table `test`.`user` trx id 23102 lock_mode X
+Record lock, heap no 10 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000007; asc     ;;
+ 1: len 6; hex 00000000560c; asc     V ;;
+ 2: len 7; hex 2c00000b900ad7; asc ,      ;;
+ 3: len 4; hex 80000007; asc     ;;
+ 4: len 3; hex 372d74; asc 7-t;;
+
+RECORD LOCKS space id 73 page no 3 n bits 80 index PRIMARY of table `test`.`user` trx id 23102 lock_mode X locks rec but not gap
+Record lock, heap no 11 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 8000000b; asc     ;;
+ 1: len 6; hex 000000005616; asc     V ;;
+ 2: len 7; hex 3500000b3d0456; asc 5   = V;;
+ 3: len 4; hex 8000000b; asc     ;;
+ 4: len 2; hex 3131; asc 11;;
+```
+
+- 记录锁（LOCK_REC_NOT_GAP）: lock_mode X locks rec but not gap
+- 间隙锁（LOCK_GAP）: lock_mode X locks gap before rec
+- Next-key 锁（LOCK_ORNIDARY）: lock_mode X
+- 插入意向锁（LOCK_INSERT_INTENTION）: lock_mode X locks gap before rec insert intention
+
+##### 2. on duplicate key update(未实践通，后续验证)
+
+在并发情况下可能发生死锁，5.7版本加强，因为并发情况下on duplicate key加锁太弱了，可能造成RR隔离级别下的数据不一致：https://dev.mysql.com/doc/refman/5.7/en/insert.html
+
+并发使用也可能造成binlog日志错误，bug：https://bugs.mysql.com/bug.php?id=50413
+
+**解决方法**
+
+1. 单线程插入使用
+2. 减少事务大小
+3. Mysql版本使用5.6，5.7才有这个错误
+4. 用直接insert代替on duplicate key，重复抛出异常。insert ingore是否能解决这个问题？解决与否网上两种都出现过，待实践
+5. 不建立或少建立唯一索引
+6. 发生死锁时，mysql会自动回滚较小的事务，只要保证业务侧重试即可
+
+参考
+
+- https://zhuanlan.zhihu.com/p/29349080
+- https://cloud.tencent.com/developer/article/1609770
+- https://developer.aliyun.com/article/727076
+
 ## 八、sql优化
 
 ### 1. 慢查询

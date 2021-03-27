@@ -200,7 +200,7 @@ object idletime {key}
 当以下两个条件同时满足时使用intset，否则使用hashtable
 
 - 所有元素都是整数类型
-- 不超过521个元素
+- 不超过512个元素
 
 > sadd {key} {member1} {member2}...    设置set
 >
@@ -219,7 +219,7 @@ object idletime {key}
 
 #### 1.1 RDB
 
-rdb是redis默认的持久化方式，通过快照的方式保存数据库中所有的键值对。当满足一定的条件时，redis进行rdb备份，将内存中的数据备份到rdb文件中
+rdb是redis默认的持久化方式，通过快照的方式保存数据库中所有的键值对（每次备份全量数据）。当满足一定的条件时，redis进行rdb备份，将内存中的数据备份到rdb文件中
 
 **触发rdb快照的时机**
 
@@ -672,12 +672,12 @@ private static Config config = new Config();
 
 #### 7.3 限制redis内存的大小
 
-maxmory表示，默认redis的内存大小为0，即不限制其他小，可能导致redis因内存不足而使用虚拟内存（依赖磁盘提供），操作卡顿
+maxmory表示，默认redis的内存大小为0，即不限制其大小，可能导致redis因内存不足而使用虚拟内存（依赖磁盘提供），操作卡顿
 
 redis内存满时，使用内存淘汰策略，共8种。maxmemory-policy 属性配置
 
 - Noevication：默认，不淘汰任何键值，当内存不足时新增指令报错
-- Allkeys-lru: 对所有键，采用最近最近未使用使用策略淘汰
+- Allkeys-lru: 对所有键，采用最近未使用使用策略淘汰
 - Allkeys-randon: 对所有键随机淘汰
 - Volatile-lru: **通用**。对设置了过期时间的键，采用最近最近未使用使用策略淘汰
 - Volitile-random: 对设置了过期时间的键随机淘汰
@@ -686,7 +686,7 @@ redis内存满时，使用内存淘汰策略，共8种。maxmemory-policy 属性
 4.0新增
 
 - allkeys-lfu：对所有键，淘汰最近最少使用的键
-- volitile-lfu
+- volitile-lfu：仅对设置了过期时间的键，淘汰最近最少使用的键
 
 #### 7.4 使用lazy free
 
@@ -936,13 +936,175 @@ redis客户端在springboot1.5.x默认Jedis实现，在springboot2.x默认lettuc
 
 setnx key value
 
-当key不存在时设置
+当key存在时返回0，当key不存在时返回1
 
 #### 11.2 setex
 
 setex key second value
 
 设置key，同时添加过期时间second
+
+#### 11.3 set key value [EX seconds | PX millseconds | KEEPTTL] [NX|XX]
+
+redis2.6.2版本新增
+
+- ex：设置过期时间，单位秒
+- px：设置过期时间，单位毫秒
+- KEEPTTL：不设置过期时间。默认
+- NX：不存在即设置
+- XX：存在即设置
+
+set key value px timeout nx ：当键不存在时设置，超时时间为timeout，单位毫秒
+
+#### 11.4 过期时间
+
+> Redis为每个键保存对应的过期时间戳，单位毫秒
+
+**Time**：结果中第一行为当前时间戳（单位秒），第二行为当前微秒数
+
+expire \<key> \<ttl>： 将key的剩余生存时间设置为ttl秒。pexpire单位为毫秒
+
+expireat \<key> \<timestamp>：将key设置为timestamp秒过期。pexpireat单位为毫秒
+
+```redis
+127.0.0.1:6379> set k1 v1
+OK
+127.0.0.1:6379> ttl k1
+(integer) -1
+127.0.0.1:6379> TIME
+1) "1616690933"
+2) "495525"
+127.0.0.1:6379> expire k1 1616691033
+(integer) 1
+127.0.0.1:6379> ttl k1
+(integer) 1616691031
+127.0.0.1:6379> expireat k1 1616691033
+(integer) 1
+127.0.0.1:6379> ttl k1
+(integer) 70
+```
+
+### 12. 分布式锁
+
+https://juejin.cn/post/6844903830442737671
+
+> 当需要对一个任务实现分布式加锁的话，因为是多台机器通过本地加锁无法实现，需要实现分布式锁。分布式锁可以通过mysql、redis、zookeeper实现
+
+#### 12.1 redis分布式锁实现-加锁
+
+##### 12.1.1 setnx + expire实现（错误）
+
+先获取锁，在通过expire设置过期时间，这样不具有原子性，可能setnx成功，expire因为指令异常或重启导致指令执行失败，key无法过期
+
+##### 12.1.2 使用lua脚本（结合setnx和expire）
+
+```java
+public boolean tryLock_with_lua(String key, String UniqueId, int seconds) {
+    String lua_scripts = "if redis.call('setnx',KEYS[1],ARGV[1]) == 1 then" +
+            "redis.call('expire',KEYS[1],ARGV[2]) return 1 else return 0 end";
+    List<String> keys = new ArrayList<>();
+    List<String> values = new ArrayList<>();
+    keys.add(key);
+    values.add(UniqueId);
+    values.add(String.valueOf(seconds));
+    Object result = jedis.eval(lua_scripts, keys, values);
+    //判断是否成功
+    return result.equals(1L);
+}
+
+```
+
+##### 12.1.3 使用set px nx原子命令
+
+```java
+public boolean tryLock_with_set(String key, String UniqueId, int seconds) {
+    return "OK".equals(jedis.set(key, UniqueId, "NX", "EX", seconds));
+}
+```
+
+#### 12.2 redis分布式锁实现-解锁
+
+> 当客户端1获取锁成功，因阻塞太长时间导致锁过期；客户端2获取到了统一资源的锁，然后客户端1恢复释放锁，造成客户端2无锁。所以直接使用del可能出现错误
+
+应该锁删除时，判断一下是否为本线程只有的锁。设置锁的值为UUID，删除时判断，通过lua实现
+
+```java
+public boolean releaseLock_with_lua(String key,String value) {
+    String luaScript = "if redis.call('get',KEYS[1]) == ARGV[1] then " +
+            "return redis.call('del',KEYS[1]) else return 0 end";
+    return jedis.eval(luaScript, Collections.singletonList(key), Collections.singletonList(value)).equals(1L);
+}
+```
+
+#### 12.3 Redlock算法
+
+> 当使用分布式锁时，Redis部署的是主从或集群，当锁设置到master中，在master未同步到slave时宕机了，导致slave切换成master却丢失分布式锁
+
+采用RedLock解决该问题，redlock原子命令实现：set nx px
+
+多节点实现的分布式算法（RedLock）：可有效减少单点故障
+
+1. 获取当前时间戳
+2. client尝试获取所有Redis实例中key、value的锁（串行获取，获取完一个获取下一实例），通过set nx px。在获取锁的过程中，等待时间要远小于键的TTL时间，不要过长时间等待已过期的key
+3. client通过获取锁的锁后时间减去第一步时间，这个时间差要小于TTL时间且超过一半的Redis实例获取锁成功(N/2+1)，才能算锁获取成功
+4. 若成功获取锁，锁的真正有效时间为TTL - 获取锁的时间 (获取最后一个机器锁时间 - 第一步时间)- 时钟漂移
+5. 若获取失败，偏会解锁所有redis实例
+
+**时钟漂移**：机器因为地理位置的不同产生的时钟时间差
+
+**RedLock失败重试**：当client不能获取锁时，应在随机时间后进行重试，有一定重试次数限制
+
+**RedLock释放锁**：当获取分布式锁失败则释放锁。释放锁时判断Redis中key对应的value是否和释放锁时的value相等，相等才释放，因此只要发出释放锁的命令，无需关注结果
+
+**RedLock问题**：RedLock只是有效解决了单点故障，但不能完全避免单点故障。比如5个节点，成功获取3个节点锁，其中1个节点宕机为成功同步slave，第二个任务还可以成功获取另外三个机器锁，实现获取两次分布式锁，未达成互斥的目的
+
+**RedLock要求**
+
+1. TTL时长要大于锁业务执行时间+获取所有Redis锁时长+时钟漂移
+2. 获取Redis锁等待超时应远小于TTL时长
+3. 获取Redis失败要有一定重试次数，当获取一般Redis锁成功之后本次获取分布式锁才算成功：N/2+1
+4. Redis崩溃后，要延迟TTL后再重启redis
+
+#### 12.4 Redisson实现
+
+Jedis时Redis的java客户端，是阻塞式I/O，而Redisson底层可使用Netty实现非阻塞I/O，该客户端封装了锁
+
+1、加入pom依赖
+
+```xml
+<dependency>
+    <groupId>org.redisson</groupId>
+    <artifactId>redisson</artifactId>
+    <version>3.10.6</version>
+</dependency>
+```
+
+2、使用Redisson
+
+```java
+// 1. 配置文件
+Config config = new Config();
+config.useSingleServer()
+        .setAddress("redis://127.0.0.1:6379")
+        .setPassword(RedisConfig.PASSWORD)
+        .setDatabase(0);
+//2. 构造RedissonClient
+RedissonClient redissonClient = Redisson.create(config);
+
+//3. 设置锁定资源名称
+RLock lock = redissonClient.getLock("redlock");
+lock.lock();
+try {
+    System.out.println("获取锁成功，实现业务逻辑");
+    Thread.sleep(10000);
+} catch (InterruptedException e) {
+    e.printStackTrace();
+} finally {
+    lock.unlock();
+}
+```
+
+具体实现细节：https://mp.weixin.qq.com/s/8uhYult2h_YUHT7q7YCKYQ
 
 ## 四、面试题
 

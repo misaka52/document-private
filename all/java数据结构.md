@@ -231,7 +231,7 @@ synchronized也隐式支持重入，比如一个线程对一个变量同时加�
 
 AQS（简称）中存在一个FIFO队列，存放阻塞的节点，节点状态如下
 
-- CANCELLD：因超时或中断被放入队列
+- CANCELLED：因超时或中断被放入队列
 - CONDITION：表示该线程因不满足某个条件而被放入队列
 - SIGNAL：该线程需要被唤醒
 - PROPAGATE：传播，在共享模式下，当前节点release后，需要通知传播通知给后续节点
@@ -775,6 +775,10 @@ SynchronousQueue：每个操作必须等待另一个线程的移除操作
 2. 当线程池中无空闲线程，则创建一个新线程，执行目标任务
 3. 线程执行完毕后，SynchronousQueue.poll(keeyAliveTime, TimeUnit.NANOSECONDS)。这个poll操作会让线程在SynchronousQueue中最多等待60s。若主线程提交了任务且与poll配对成功，取出线程执行；否则线程闲置超过60s，线程终止
 
+### ScheduleThreadPool
+
+可以延迟执行任务，或定时执行任务。和Timer类似，但ScheduleThreadPool功能更强大，更灵活，可以在构造函数中指定多个对应的后台线程
+
 ### ForkJoinPool
 
 forkJoinPool是jdk1.7引入的线程池，可以将一个任务拆成多个小任务，然后将多个小任务结果汇总（即join）。
@@ -880,8 +884,4 @@ public static ExecutorService newWorkStealingPool() {
              null, true);
     }
 ```
-
-### ScheduleThreadPool
-
-可以延迟执行任务，或定时执行任务。和Timer类似，但ScheduleThreadPool功能更强大，更灵活，可以在构造函数中指定多个对应的后台线程
 
