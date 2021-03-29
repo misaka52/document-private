@@ -4,12 +4,12 @@
 
 实现关注点
 
-- size表示实际大小，threshold表示容量，cap表示哈希表大小。当未设置容量时，则哈希表大小默认16，容量默认16\*负载因子（默认0.75）；当设置了容量，哈希表大小等于容量，实际容量为哈希表容量\*负载因子；当hashMap扩容时，容量和表大小都变为原来的两倍
+- size表示实际大小，threshold表示容量，cap表示哈希表大小。当未设置容量时，则哈希表大小cap默认16，容量threshold默认16\*负载因子（默认0.75）；当设置了threshold，cap大小等于threshold，实际容量threshold为哈希表容量\*负载因子；当hashMap扩容时，容量和表大小都变为原来的两倍
 - new HashMap<>(int) // 传入的为map容量。实际大小为实际容量*负载因子取整
 - 默认遇到重复键值，value更新
 - 初始化时哈希表为空表，在第一次添加元素时初始化哈希表
 - 允许键值为null，对于null键，存入table[0]中
-- 链表长度大于8，链表转成红黑树。删除数据时，红黑树节点过少时转成链表（在[2,6]范围内，具体要看红黑树结构），或者在扩容rehash时新树节点小于等于6转成链表
+- 链表长度大于8，且桶长度大于64，链表转成红黑树，否则之间简单扩容。删除数据时，红黑树节点过少时转成链表（在[2,6]范围内，具体要看红黑树结构），或者在扩容rehash时新树节点小于等于6转成链表
 - 仅当新增和删除数据modCount自增，扩容和更新时不变
 
 jdk8相对于jdk7变化
@@ -171,6 +171,691 @@ Jdk1.8相对于jdk1.7改动
 - 扩容时将任务拆分，使用多线程并发执行加快扩容
 - 获取map大小，引入计数器概念（CounterCell数组）直接无锁获取。而jdk1.7需要对所有段加锁。无modCount，1.7还有
 
+> 以下正对jdk1.8开始讨论
+
+#### 1. ConcurrentHashMap简介
+
+![](../image/1813835413-5b7bf01b273cf_fix732.png)
+
+#### 2. 基本结构
+
+![](../image/2818381487-5bbd655b65c0c_fix732.png)
+
+chm中维护了一个Node类型的数组，也就是table。数组的每个位置table[i]代表了一个桶，table[i]共有四种不同类型：Node、TreeBin、ForwardingNode、ReservationNode
+
+> TreeBin锁连接的是一个红黑色，树节点用TreeNode表示，因红黑树的操作比较复杂，因此采用TreeBin封装TreeNode
+
+##### 2.1 Node
+
+桶上的节点一般用Node表示，当链表过程才会转化成红黑树。
+
+```java
+/**
+ * 普通的Entry结点, 以链表形式保存时才会使用, 存储实际的数据.
+ */
+static class Node<K, V> implements Map.Entry<K, V> {
+    final int hash;
+    final K key;
+    volatile V val;
+    volatile Node<K, V> next;   // 链表指针
+}
+```
+
+##### 2.2 TreeNode
+
+表示红黑树的节点，不会直接链接到桶上，而是由红黑树节点TreeBin链接
+
+```java
+/**
+ * 红黑树结点, 存储实际的数据.
+ */
+static final class TreeNode<K, V> extends Node<K, V> {
+    boolean red;
+
+    TreeNode<K, V> parent;
+    TreeNode<K, V> left;
+    TreeNode<K, V> right;
+
+    /**
+     * prev指针是为了方便删除.
+     * 删除链表的非头结点时，需要知道它的前驱结点才能删除，所以直接提供一个prev指针
+     */
+    TreeNode<K, V> prev;
+}
+```
+
+##### 2.3 TreeBin
+
+相当于TreeNode的代理节点，提供了一些类红黑树的操作，比如加锁、解锁
+
+```java
+/**
+ * TreeNode的代理结点（相当于封装了TreeNode的容器，提供针对红黑树的转换操作和锁控制）
+ * hash值固定为-3
+ */
+static final class TreeBin<K, V> extends Node<K, V> {
+    TreeNode<K, V> root;                // 红黑树结构的根结点
+    volatile TreeNode<K, V> first;      // 链表结构的头结点
+    volatile Thread waiter;             // 最近的一个设置WAITER标识位的线程
+
+    volatile int lockState;             // 整体的锁状态标识位
+
+    static final int WRITER = 1;        // 二进制001，红黑树的写锁状态
+    static final int WAITER = 2;        // 二进制010，红黑树的等待获取写锁状态
+    static final int READER = 4;        // 二进制100，红黑树的读锁状态，读可以并发，每多一个读线程，lockState都加上一个READER值
+}
+```
+
+##### 2.4 ForwardingNode
+
+ForwardingNode在扩容时才用到
+
+```java
+/**
+ * ForwardingNode是一种临时结点，在扩容进行中才会出现，hash值固定为-1，且不存储实际数据。
+ * 如果旧table数组的一个hash桶中全部的结点都迁移到了新table中，则在这个桶中放置一个ForwardingNode。
+ * 读操作碰到ForwardingNode时，将操作转发到扩容后的新table数组上去执行；写操作碰见它时，则尝试帮助扩容。
+ */
+static final class ForwardingNode<K, V> extends Node<K, V> {
+    final Node<K, V>[] nextTable;
+
+    ForwardingNode(Node<K, V>[] tab) {
+        super(MOVED, null, null, null);
+        this.nextTable = tab;
+    }
+}
+```
+
+##### 2.5 ReservationNode
+
+保留节点，chm的特殊方法会用到这个
+
+```java
+/**
+ * 保留结点.
+ * hash值固定为-3， 不保存实际数据
+ * 只在computeIfAbsent和compute这两个函数式API中充当占位符加锁使用
+ */
+static final class ReservationNode<K, V> extends Node<K, V> {
+    ReservationNode() {
+        super(RESERVED, null, null, null);
+    }
+
+    Node<K, V> find(int h, Object k) {
+        return null;
+    }
+}
+```
+
+#### 3. ConcurrentHashMap的构造
+
+提供五种构造器，采用懒加载的方式，在第一次插入键值对时才初始化table数组
+
+> 指定initialCapacity，cap=initialCapacity*1.5后续初始化时表示表容量。实际容量为0. 75cap
+
+```java
+public ConcurrentHashMap(int initialCapacity) {
+        if (initialCapacity < 0)
+            throw new IllegalArgumentException();
+        int cap = ((initialCapacity >= (MAXIMUM_CAPACITY >>> 1)) ?
+                   MAXIMUM_CAPACITY :
+                   tableSizeFor(initialCapacity + (initialCapacity >>> 1) + 1));
+        this.sizeCtl = cap;
+    }
+```
+
+##### 3.1 常量
+
+```java
+/**
+ * 最大容量.
+ */
+private static final int MAXIMUM_CAPACITY = 1 << 30;
+
+/**
+ * 默认初始容量
+ */
+private static final int DEFAULT_CAPACITY = 16;
+
+/**
+ * The largest possible (non-power of two) array size.
+ * Needed by toArray and related methods.
+ */
+static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
+
+/**
+ * 负载因子，为了兼容JDK1.8以前的版本而保留。
+ * JDK1.8中的ConcurrentHashMap的负载因子恒定为0.75
+ */
+private static final float LOAD_FACTOR = 0.75f;
+
+/**
+ * 链表转树的阈值，即链接结点数大于8时， 链表转换为树.
+ */
+static final int TREEIFY_THRESHOLD = 8;
+
+/**
+ * 树转链表的阈值，即树结点树小于6时，树转换为链表.
+ */
+static final int UNTREEIFY_THRESHOLD = 6;
+
+/**
+ * 在链表转变成树之前，还会有一次判断：
+ * 即只有键值对数量大于MIN_TREEIFY_CAPACITY，才会发生转换。
+ * 这是为了避免在Table建立初期，多个键值对恰好被放入了同一个链表中而导致不必要的转化。
+ */
+static final int MIN_TREEIFY_CAPACITY = 64;
+
+/**
+ * 在树转变成链表之前，还会有一次判断：
+ * 即只有键值对数量小于MIN_TRANSFER_STRIDE，才会发生转换.hashMap没有该判断
+ */
+private static final int MIN_TRANSFER_STRIDE = 16;
+
+/**
+ * 用于在扩容时生成唯一的随机数.
+ */
+private static int RESIZE_STAMP_BITS = 16;
+
+/**
+ * 可同时进行扩容操作的最大线程数.
+ */
+private static final int MAX_RESIZERS = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
+
+/**
+ * The bit shift for recording size stamp in sizeCtl.
+ */
+private static final int RESIZE_STAMP_SHIFT = 32 - RESIZE_STAMP_BITS;
+
+static final int MOVED = -1;                // 标识ForwardingNode结点（在扩容时才会出现，不存储实际数据）
+static final int TREEBIN = -2;              // 标识红黑树的根结点
+static final int RESERVED = -3;             // 标识ReservationNode结点（）
+static final int HASH_BITS = 0x7fffffff;    // usable bits of normal node hash
+
+/**
+ * CPU核心数，扩容时使用
+ */
+static final int NCPU = Runtime.getRuntime().availableProcessors();
+```
+
+##### 3.2 变量
+
+```java
+/**
+ * Node数组，标识整个Map，首次插入元素时创建，大小总是2的幂次.
+ */
+transient volatile Node<K, V>[] table;
+
+/**
+ * 扩容后的新Node数组，只有在扩容时才非空.
+ */
+private transient volatile Node<K, V>[] nextTable;
+
+/**
+ * 控制table的初始化和扩容.
+ * 0  : 初始默认值
+ * -1 : 有线程正在进行table的初始化
+ * >0 : table初始化时使用的容量，或初始化/扩容完成后的threshold
+ * -(1 + nThreads) : 记录正在执行扩容任务的线程数
+ */
+private transient volatile int sizeCtl;
+
+/**
+ * 扩容时需要用到的一个下标变量.
+ */
+private transient volatile int transferIndex;
+
+/**
+ * 计数基值,当没有线程竞争时，计数将加到该变量上。类似于LongAdder的base变量
+ */
+private transient volatile long baseCount;
+
+/**
+ * 计数数组，出现并发冲突时使用。类似于LongAdder的cells数组
+ */
+private transient volatile CounterCell[] counterCells;
+
+/**
+ * 自旋标识位，用于CounterCell[]扩容时使用。类似于LongAdder的cellsBusy变量
+ */
+private transient volatile int cellsBusy;
+
+
+// 视图相关字段
+private transient KeySetView<K, V> keySet;
+private transient ValuesView<K, V> values;
+private transient EntrySetView<K, V> entrySet;
+```
+
+#### 4. put方法
+
+put方法实现。当key不存在时插入，且插入时使用synchronized锁
+
+```java
+ * 实际的插入操作
+ *
+ * @param onlyIfAbsent true:仅当key不存在时,才插入
+ */
+final V putVal(K key, V value, boolean onlyIfAbsent) {
+    if (key == null || value == null) throw new NullPointerException();
+    int hash = spread(key.hashCode());  // 再次计算hash值
+
+    /**
+     * 使用链表保存时，binCount记录table[i]这个桶中所保存的结点数；
+     * 使用红黑树保存时，binCount==2，保证put后更改计数值时能够进行扩容检查，同时不触发红黑树化操作
+     */
+    int binCount = 0;
+
+    for (Node<K, V>[] tab = table; ; ) {            // 自旋插入结点，直到成功
+        Node<K, V> f;
+        int n, i, fh;
+        if (tab == null || (n = tab.length) == 0)                   // CASE1: 首次初始化table —— 懒加载
+            tab = initTable();
+        else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {    // CASE2: table[i]对应的桶为null
+            // 注意下上面table[i]的索引i的计算方式：[ key的hash值 & (table.length-1) ]
+            // 这也是table容量必须为2的幂次的原因，读者可以自己看下当table.length为2的幂次时，(table.length-1)的二进制形式的特点 —— 全是1
+            // 配合这种索引计算方式可以实现key的均匀分布，减少hash冲突
+            if (casTabAt(tab, i, null, new Node<K, V>(hash, key, value, null))) // 插入一个链表结点
+                break;
+        } else if ((fh = f.hash) == MOVED)                          // CASE3: 发现ForwardingNode结点，说明此时table正在扩容，则尝试协助数据迁移
+            tab = helpTransfer(tab, f);
+        else {                                                      // CASE4: 出现hash冲突,也就是table[i]桶中已经有了结点
+            V oldVal = null;
+            synchronized (f) {              // 锁住table[i]结点
+                if (tabAt(tab, i) == f) {   // 再判断一下table[i]是不是第一个结点, 防止其它线程的写修改
+                    if (fh >= 0) {          // CASE4.1: table[i]是链表结点
+                        binCount = 1;
+                        for (Node<K, V> e = f; ; ++binCount) {
+                            K ek;
+                            // 找到“相等”的结点，判断是否需要更新value值
+                            if (e.hash == hash && ((ek = e.key) == key || (ek != null && key.equals(ek)))) {
+                                oldVal = e.val;
+                                if (!onlyIfAbsent)
+                                    e.val = value;
+                                break;
+                            }
+                            Node<K, V> pred = e;
+                            if ((e = e.next) == null) {     // “尾插法”插入新结点
+                                pred.next = new Node<K, V>(hash, key,
+                                    value, null);
+                                break;
+                            }
+                        }
+                    } else if (f instanceof TreeBin) {  // CASE4.2: table[i]是红黑树结点
+                        Node<K, V> p;
+                        binCount = 2;
+                        if ((p = ((TreeBin<K, V>) f).putTreeVal(hash, key, value)) != null) {
+                            oldVal = p.val;
+                            if (!onlyIfAbsent)
+                                p.val = value;
+                        }
+                    }
+                }
+            }
+            if (binCount != 0) {
+                if (binCount >= TREEIFY_THRESHOLD)
+                    treeifyBin(tab, i);     // 链表 -> 红黑树 转换
+                if (oldVal != null)         // 表明本次put操作只是替换了旧值，不用更改计数值
+                    return oldVal;
+                break;
+            }
+        }
+    }
+    addCount(1L, binCount);             // 计数值加1
+    return null;
+}   
+```
+
+##### 4.1 initTable() 懒加载
+
+采用懒加载的方式，当添加键值对时，table为空则进行初始化
+
+```java
+/**
+ * 初始化table, 使用sizeCtl作为初始化容量.
+ */
+private final Node<K, V>[] initTable() {
+    Node<K, V>[] tab;
+    int sc;
+    while ((tab = table) == null || tab.length == 0) {  //自旋直到初始化成功
+        if ((sc = sizeCtl) < 0)         // sizeCtl<0 说明table已经正在初始化/扩容
+            Thread.yield();
+        else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {  // 将sizeCtl更新成-1,表示正在初始化中
+            try {
+                if ((tab = table) == null || tab.length == 0) {
+                    int n = (sc > 0) ? sc : DEFAULT_CAPACITY;
+                    Node<K, V>[] nt = (Node<K, V>[]) new Node<?, ?>[n];
+                    table = tab = nt;
+                    sc = n - (n >>> 2);     // n - (n >>> 2) = n - n/4 = 0.75n, 前面说了loadFactor已在JDK1.8废弃
+                }
+            } finally {
+                sizeCtl = sc;               // 设置threshold = 0.75 * table.length
+            }
+            break;
+        }
+    }
+    return tab;
+}
+```
+
+##### 4.2 table[i]对应的数据为空
+
+采用CAS的方式设置Node节点
+
+##### 4.3 当发现ForwardingNode节点时，说明table正在扩容，需协助扩容
+
+扩容很复杂，下面讲解
+
+疑问：本次set操作丢失？？？
+
+##### 4.4 出现hash冲突
+
+若Node节点的为Node时，采用尾插入添加Node到链表末尾
+
+若Node节点为TreeBin，才将新节点添加到红黑树中
+
+```java
+/**
+ * 尝试进行 链表 -> 红黑树 的转换.
+ */
+private final void treeifyBin(Node<K, V>[] tab, int index) {
+    Node<K, V> b;
+    int n, sc;
+    if (tab != null) {
+
+        // CASE 1: table的容量 < MIN_TREEIFY_CAPACITY(64)时，直接进行table扩容，不进行红黑树转换
+        if ((n = tab.length) < MIN_TREEIFY_CAPACITY)
+            tryPresize(n << 1);
+
+            // CASE 2: table的容量 ≥ MIN_TREEIFY_CAPACITY(64)时，进行链表 -> 红黑树的转换
+        else if ((b = tabAt(tab, index)) != null && b.hash >= 0) {
+            synchronized (b) {
+                if (tabAt(tab, index) == b) {
+                    TreeNode<K, V> hd = null, tl = null;
+
+                    // 遍历链表，建立红黑树
+                    for (Node<K, V> e = b; e != null; e = e.next) {
+                        TreeNode<K, V> p = new TreeNode<K, V>(e.hash, e.key, e.val, null, null);
+                        if ((p.prev = tl) == null)
+                            hd = p;
+                        else
+                            tl.next = p;
+                        tl = p;
+                    }
+                    // 以TreeBin类型包装，并链接到table[index]中
+                    setTabAt(tab, index, new TreeBin<K, V>(hd));
+                }
+            }
+        }
+    }
+}
+```
+
+#### 5. get方法
+
+不加锁读，table变量为volatile类型
+
+```java
+/**
+ * 根据key查找对应的value值
+ *
+ * @return 查找不到则返回null
+ * @throws NullPointerException if the specified key is null
+ */
+public V get(Object key) {
+    Node<K, V>[] tab;
+    Node<K, V> e, p;
+    int n, eh;
+    K ek;
+    int h = spread(key.hashCode());     // 重新计算key的hash值
+    if ((tab = table) != null && (n = tab.length) > 0 &&
+            (e = tabAt(tab, (n - 1) & h)) != null) {
+        if ((eh = e.hash) == h) {       // table[i]就是待查找的项，直接返回
+            if ((ek = e.key) == key || (ek != null && key.equals(ek)))
+                return e.val;
+        } else if (eh < 0)              // hash值<0, 说明遇到特殊结点(非链表结点), 调用find方法查找
+            return (p = e.find(h, key)) != null ? p.val : null;
+        while ((e = e.next) != null) {  // 按链表方式查找
+            if (e.hash == h &&
+                    ((ek = e.key) == key || (ek != null && key.equals(ek))))
+                return e.val;
+        }
+    }
+    return null;
+}
+```
+
+- 当table[i]表头节点key与目标key相等，直接返回
+- 当table[i]表头节点为Node类型，遍历链表查找
+- 当table[i]表头节点为特殊节点，通过find方法查找
+
+```java
+/**
+ * 链表查找.
+ */
+Node<K, V> find(int h, Object k) {
+    Node<K, V> e = this;
+    if (k != null) {
+        do {
+            K ek;
+            if (e.hash == h && ((ek = e.key) == k || (ek != null && k.equals(ek))))
+                return e;
+        } while ((e = e.next) != null);
+    }
+    return null;
+}
+```
+
+##### 5.1 TreeBin节点的查找
+
+```java
+/**
+ * 从根结点开始遍历查找，找到“相等”的结点就返回它，没找到就返回null
+ * 当存在写锁时，以链表方式进行查找
+ */
+final Node<K, V> find(int h, Object k) {
+    if (k != null) {
+        for (Node<K, V> e = first; e != null; ) {
+            int s;
+            K ek;
+            /**
+             * 两种特殊情况下以链表的方式进行查找:
+             * 1. 有线程正持有写锁，这样做能够不阻塞读线程
+             * 2. 有线程等待获取写锁，不再继续加读锁，相当于“写优先”模式
+             */
+            if (((s = lockState) & (WAITER | WRITER)) != 0) {
+                if (e.hash == h &&
+                    ((ek = e.key) == k || (ek != null && k.equals(ek))))
+                    return e;
+                e = e.next;     // 链表形式
+            }
+
+            // 读线程数量加1，读状态进行累加
+            else if (U.compareAndSwapInt(this, LOCKSTATE, s, s + READER)) {
+                TreeNode<K, V> r, p;
+                try {
+                    p = ((r = root) == null ? null :
+                        r.findTreeNode(h, k, null));
+                } finally {
+                    Thread w;
+                    // 如果当前线程是最后一个读线程，且有写线程因为读锁而阻塞，则写线程，告诉它可以尝试获取写锁了
+                    if (U.getAndAddInt(this, LOCKSTATE, -READER) == (READER | WAITER) && (w = waiter) != null)
+                        LockSupport.unpark(w);
+                }
+                return p;
+            }
+        }
+    }
+    return null;
+}
+
+```
+
+##### 5.2 ForwardingNode节点的查找
+
+扩容时存在
+
+```java
+/**
+ * 在新的扩容table——nextTable上进行查找
+ */
+Node<K, V> find(int h, Object k) {
+    // loop to avoid arbitrarily deep recursion on forwarding nodes
+    outer:
+    for (Node<K, V>[] tab = nextTable; ; ) {
+        Node<K, V> e;
+        int n;
+        if (k == null || tab == null || (n = tab.length) == 0 ||
+            (e = tabAt(tab, (n - 1) & h)) == null)
+            return null;
+        for (; ; ) {
+            int eh;
+            K ek;
+            if ((eh = e.hash) == h &&
+                ((ek = e.key) == k || (ek != null && k.equals(ek))))
+                return e;
+            if (eh < 0) {
+                if (e instanceof ForwardingNode) {
+                  	// 更换新表查找
+                    tab = ((ForwardingNode<K, V>) e).nextTable;
+                    continue outer;
+                } else
+                    return e.find(h, k);
+            }
+            if ((e = e.next) == null)
+                return null;
+        }
+    }
+}
+```
+
+##### 5.3 ReversionNode节点的查找
+
+保留节点，不保存实际数据
+
+```java
+Node<K, V> find(int h, Object k) {
+    return null;
+}
+```
+
+#### 6. ConcurrentHashMap里的计数
+
+采用类似LongAddr的方式，保存基数值（无竞争时增加）和计数数组（并发时计算）
+
+##### 6.1 计数原理
+
+基数+计数数组和
+
+```java
+public int size() {
+    long n = sumCount();
+    return ((n < 0L) ? 0 :
+            (n > (long) Integer.MAX_VALUE) ? Integer.MAX_VALUE :
+                    (int) n);
+}
+
+final long sumCount() {
+    CounterCell[] as = counterCells;
+    CounterCell a;
+    long sum = baseCount;
+    if (as != null) {
+        for (int i = 0; i < as.length; ++i) {
+            if ((a = as[i]) != null)
+                sum += a.value;
+        }
+    }
+    return sum;
+}
+```
+
+##### 6.2 基本字段
+
+```java
+/**
+ * 计数基值,当没有线程竞争时，计数将加到该变量上。类似于LongAdder的base变量
+ */
+private transient volatile long baseCount;
+
+/**
+ * 计数数组，出现并发冲突时使用。类似于LongAdder的cells数组
+ */
+private transient volatile CounterCell[] counterCells;
+
+/**
+ * 自旋标识位，用于CounterCell[]扩容时使用。类似于LongAdder的cellsBusy变量
+ */
+private transient volatile int cellsBusy;
+```
+
+##### 6.3 addCount实现
+
+当插入一对键值对时，通过addCount加一
+
+```java
+/**
+ * 实际的插入操作
+ *
+ * @param onlyIfAbsent true:仅当key不存在时,才插入
+ */
+final V putVal(K key, V value, boolean onlyIfAbsent) {
+    // …
+    addCount(1L, binCount);             // 计数值加1
+    return null;
+}
+```
+
+addCount具体实现如下
+
+- 首先，若counterCells为null，则表示无竞争，直接baseCount加一
+- 否则，先尝试更新countCells[i]，更新成功则退出，更新失败则涉及到countCells的扩容，调用fullAddCount()
+- 流程和LongAddr类似，参考：https://segmentfault.com/a/1190000015865714
+
+```java
+/**
+ * 更改计数值
+ */
+private final void addCount(long x, int check) {
+    CounterCell[] as;
+    long b, s;
+    if ((as = counterCells) != null ||
+            !U.compareAndSwapLong(this, BASECOUNT, b = baseCount, s = b + x)) { // 首先尝试更新baseCount
+ 
+        // 更新失败,说明出现并发冲突,则将计数值累加到Cell槽
+        CounterCell a;
+        long v;
+        int m;
+        boolean uncontended = true;
+        if (as == null || (m = as.length - 1) < 0 ||
+                (a = as[ThreadLocalRandom.getProbe() & m]) == null ||   // 根据线程hash值计算槽索引
+                !(uncontended = U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x))) {
+            fullAddCount(x, uncontended);       // 槽更新也失败, 则会执行fullAddCount
+            return;
+        }
+        if (check <= 1)
+            return;
+        s = sumCount();
+    }
+    if (check >= 0) {       // 检测是否扩容
+        Node<K, V>[] tab, nt;
+        int n, sc;
+        while (s >= (long) (sc = sizeCtl) && (tab = table) != null && (n = tab.length) < MAXIMUM_CAPACITY) {
+            int rs = resizeStamp(n);
+            if (sc < 0) {
+                if ((sc >>> RESIZE_STAMP_SHIFT) != rs || sc == rs + 1 ||
+                        sc == rs + MAX_RESIZERS || (nt = nextTable) == null ||
+                        transferIndex <= 0)
+                    break;
+                if (U.compareAndSwapInt(this, SIZECTL, sc, sc + 1))
+                    transfer(tab, nt);
+            } else if (U.compareAndSwapInt(this, SIZECTL, sc, (rs << RESIZE_STAMP_SHIFT) + 2))
+                transfer(tab, null);
+            s = sumCount();
+        }
+    }
+}
+```
+
 ### CopyOnWriteArrayList/CopyOnWriteArraySet
 
 线程安全list，读取迭代期间不需要对容器进行加锁或复制。
@@ -183,6 +868,12 @@ Jdk1.8相对于jdk1.7改动
 
 高并发下性能最好的队列
 
+### Lock
+
+Lock()：添加互斥锁，类似synchronized。在获得锁之前，线程间阻塞，处于等待态
+
+lockInterruptibly()：当线程中断，则抛出中断异常。其他类似lock
+
 ### ReentrantLock
 
 可重入锁，每次只能一个线程能获取锁。可重入性，获取锁的线程可多次获取，通过计数标记，完全释放锁时也必须要释放与加锁同样的次数
@@ -191,9 +882,9 @@ Jdk1.8相对于jdk1.7改动
 
 默认新建非公平性锁，若传入参数true可选择公平性锁。
 
-**tryLock()**:  非公平性方式直接CAS获取锁，不关心等待顺序
+**tryLock()**:  非公平性方式直接CAS获取锁，不关心等待顺序。首先获取锁状态，若未加锁则通过CAS尝试加锁；若已加锁，判断加锁线程为当前线程，则加锁标志加一。
 
-**lock()-非公平锁 **：直接CAS获取锁（若无锁状态直接获取锁），失败再非公平性尝试获取锁，再失败将自己加入到等待队列中，并将当前线程中断等待，返回
+**lock()-非公平锁 **：直接CAS获取锁（若无锁状态直接获取锁），失败再非公平性尝试获取锁，再失败将自己加入到等待队列中（队列末尾），并将当前线程中断等待，返回
 
 **lock()-公平锁 **：若当前锁处于未被获取状态且等待队列内无等待中的任务，CAS获取锁；否则将任务添加到等待队列中，并将当前线程中断等待，返回
 
@@ -225,31 +916,51 @@ protected final boolean tryAcquire(int acquires) {
 
 synchronized也隐式支持重入，比如一个线程对一个变量同时加锁，不会阻塞
 
-### AbstractQueuedSynchronizer
+### ReadWriteLock
 
-并发编程实现同步器的一个框架，基于FIFO实现（Reentrant中的lock继承自它）
+读写锁，分为读写和写锁。适合多读少写的场景，常见实现ReentrantReadWriteLock
 
-AQS（简称）中存在一个FIFO队列，存放阻塞的节点，节点状态如下
+- 读锁：读锁之间不互斥
+- 写锁：与读锁、写锁互斥
 
-- CANCELLED：因超时或中断被放入队列
-- CONDITION：表示该线程因不满足某个条件而被放入队列
-- SIGNAL：该线程需要被唤醒
-- PROPAGATE：传播，在共享模式下，当前节点release后，需要通知传播通知给后续节点
+**锁降级**：支持锁降级，对于同一线程，先获取写锁，再获取读锁，然后释放写锁，相当于写锁降级成了读锁。这样不能锁升级
 
-模式：独占模式：只能一个线程独占资源，如ReentrantLock；共享模式，资源可被多个线程同时持有，如CountDownLatch
+**Condition条件支持**：读锁调用newCondition()会抛出UnsupportedOperationException()，写锁可以获取condition。因为线程对读锁的访问不受限制，无法锁住对象，所以不支持condition
+
+### LockSupport
+
+提供两个方法
+
+- park()：阻塞当前调用线程。调用该方法时，permit置为0。park方法会响应中断，当遇到中断时直接返回，不抛出异常
+- unpark()：用于唤醒指定线程。调用该方法时，permit加一
 
 ```java
-// 获取锁
-public final void acquire(int arg) {
-    if (!tryAcquire(arg) &&
-        acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
-        selfInterrupt();
+public class FIFOMutex {
+    private final AtomicBoolean locked = new AtomicBoolean(false);
+    private final Queue<Thread> waiters = new ConcurrentLinkedQueue<Thread>();
+ 
+    public void lock() {
+        Thread current = Thread.currentThread();
+        waiters.add(current);
+ 
+        // 如果当前线程不在队首，或锁已被占用，则当前线程阻塞
+        // NOTE：这个判断的意图其实就是：锁必须由队首元素拿到
+        while (waiters.peek() != current || !locked.compareAndSet(false, true)) {
+            LockSupport.park(this);
+        }
+        waiters.remove(); // 删除队首元素
+    }
+ 
+    public void unlock() {
+        locked.set(false);
+        LockSupport.unpark(waiters.peek());
+    }
 }
 ```
 
 ### StampedLock
 
-和读写锁类似。但是有以下不同
+读写锁存在一个潜在问题：当存在读锁的时候无法写入。java8引入了stampedLock，增加乐观读锁，允许读的过程中写入，但可能产生数据不一致，需要额外增加代码判断版本。stampedLock提供并发性能，但在读时发现数据变更需要再重新读，利用CAS机制
 
 - 当使用读锁时，可以通过乐观模式获取，先记录版本号，获取完成再对比版本号，若相同直接返回无需加锁；若失败则添加读锁。在读锁操作时性能上有提升
 - 读锁可以升级为写锁
@@ -458,6 +1169,132 @@ data = exchanger.exchange(data);
 int data2 = 2;
 data2 = exchanger.exchange(data2);
 // 交换后，数据对调
+```
+
+### AbstractQueuedSynchronizer
+
+并发编程实现同步器的一个框架，基于FIFO实现（Reentrant中的lock继承自它），AQS（简称）中存在一个FIFO队列，存放阻塞的节点
+
+AQS提供了一套通用的机制来管理同步状态，阻塞和唤醒线程，管理等待队列
+
+#### 1. 原理简述
+
+AQS作用为：管理同步状态、阻塞和唤醒线程、管理等待队列
+
+##### 1.1 同步状态
+
+AQS采用int类型的state来保存同步状态，并暴露getState、setState和compareAndSetState来读取和更新状态
+
+##### 1.2 线程的唤醒/阻塞
+
+通过LockSupport来完成线程的唤醒和阻塞
+
+##### 1.3 等待队列
+
+保存两个首尾节点
+
+节点状态定义
+
+- CANCELLED：1，取消，表示后驱节点被中断或超时，需要移出队列
+- SIGNAL：-1，发信号，表示后驱节点被阻塞了（当前节点在入队后、阻塞前，应确保prev节点类型为SIGNAL，以便prev节点取消或释放当前节点唤醒）
+- CONDITION：-2，表示当前节点在Condition队列中，因为某个条件被阻塞了
+- PROPAGATE：-3，传播，适用于共享模式
+- INITIAL：0，默认，新节点状态
+
+#### 2. ReentrantLock分析
+
+https://segmentfault.com/a/1190000015804888
+
+**非公平锁加速**
+
+1. 先尝试使用CAS方式加锁，状态置为1，成功直接结束
+2. 否则调用tryAcquire尝试获取锁，成功结束
+3. 否则新建节点，添加到等待队列末尾
+4. 获取节点的先驱节点（前置），若其前置节点为head节点则尝试获取锁，成功则将当前节点置为head节点，结束
+5. 若非head节点或获取锁失败，判断当前任务是否需要挂起，判断先驱节点状态更新：-1=等待；大于0=跳过被取消的节点；其他=将前置节点状态改为-1
+6. 若上述方式返回等待则挂起当前线程
+7. 当head节点释放锁时，会唤醒任务队列表头节点线程
+
+#### 3. Condition分析
+
+Condition类属于AQS内部类，其中包含表头和表尾（一条链表），新元素放入表尾
+
+全流程分析：
+
+1. 线程A获取锁，调用await方法，将该任务放入Condition队列中；
+2. 线程B获取锁，调用signal方法，从Condition队列中表头中取出一个Condition任务，将其状态改为0，并将其插入等待队列；
+3. 线程B释放锁，唤醒等待队列中一个任务，线程A；
+4. 线程A被唤醒，跳出循环，重新获取锁执行
+5. 清理已取消的任务
+
+```java
+// 类
+public class ConditionObject implements Condition, java.io.Serializable {
+        private static final long serialVersionUID = 1173984872572414699L;
+        /** First node of condition queue. */
+        private transient Node firstWaiter;
+        /** Last node of condition queue. */
+        private transient Node lastWaiter;
+}
+
+// Condition.await()
+public final void await() throws InterruptedException {
+            if (Thread.interrupted())
+                throw new InterruptedException();
+  					// 新建Condition节点，节点放入Condition链表表尾
+            Node node = addConditionWaiter();
+            int savedState = fullyRelease(node);
+            int interruptMode = 0;
+            while (!isOnSyncQueue(node)) {
+              	// 阻塞
+                LockSupport.park(this);
+                if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
+                    break;
+            }
+  					// 重新获取锁
+            if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
+                interruptMode = REINTERRUPT;
+            if (node.nextWaiter != null) // clean up if cancelled
+                unlinkCancelledWaiters();
+            if (interruptMode != 0)
+                reportInterruptAfterWait(interruptMode);
+        }
+// 新增监控节点
+private Node addConditionWaiter() {
+            Node t = lastWaiter;
+            // If lastWaiter is cancelled, clean out.
+            if (t != null && t.waitStatus != Node.CONDITION) {
+                unlinkCancelledWaiters();
+                t = lastWaiter;
+            }
+            Node node = new Node(Thread.currentThread(), Node.CONDITION);
+            if (t == null)
+                firstWaiter = node;
+            else
+                t.nextWaiter = node;
+  					// 新节点防止链表尾部
+            lastWaiter = node;
+            return node;
+        }
+
+// 释放节点锁
+final int fullyRelease(Node node) {
+        boolean failed = true;
+        try {
+            int savedState = getState();
+            if (release(savedState)) {
+                failed = false;
+                return savedState;
+            } else {
+              	// 若持有锁则抛出异常
+                throw new IllegalMonitorStateException();
+            }
+        } finally {
+          	// 释放失败则将当前节点置为CANCELLED，后续从队列中移除
+            if (failed)
+                node.waitStatus = Node.CANCELLED;
+        }
+    }
 ```
 
 ## 线程池

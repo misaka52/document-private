@@ -307,7 +307,7 @@ release(): 释放锁，信号量加1。释放成功后唤醒等待队列中的�
 
 ### AbstractQueuedSynchronizer
 
-并发编程实现同步器的一个框架，基于FIFO双向队列实现。（ReentrantLock中的锁类Sync继承自它）
+并发编程实现同步器的一个框架，基于FIFO双向队列实现，一个抽象类。（ReentrantLock中的锁类Sync继承自它）
 
 AQS（简称）中存在一个FIFO队列，存放阻塞的节点，节点状态如下
 

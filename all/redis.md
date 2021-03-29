@@ -182,9 +182,78 @@ object idletime {key}
 - 元素个数小于等于512
 - 保存的元素长度都不超过64
 
-在3.2版本之后，只有quicklist，quickList由linkedList和zipList组成，每个节点都是一个压缩列表节点，且存在前后指针
-
 > rpush {key} {value1} {value2} ...   创建并保存list
+
+##### 3.2.1 quicklist
+
+> zipList存储在一段连续的内存中，存储效率高，节省空间。但对于修改操作麻烦，对于插入和删除操作，都可能需要移动数据，进程内存申请和释放，导致大量的数据拷贝
+>
+> linkedList便宜表两段的pop和push操作，插入复杂度低。但存储效率不高，每个节点需要额外存储两个指针；其次，双向链表每个节点是单独的内存块，地址不连续，可能产生更多的内存碎片
+
+在3.2版本之后，列表的底层实现改为quicklist，quickList由linkedList和zipList组成，每个节点都是一个压缩列表节点，且存在前后指针
+
+##### 3.2.2 redis配置
+
+**list-max-ziplist-size -2**
+
+该配置取正时，表示限制每个ziplist节点的长度。若为5表示每个节点上最多有5条数据
+
+该配置取负时，表示限制每个ziplist节点的大小。-1=4K，-2=8K，-3=16K，-4=32K，-5=64K。默认-2
+
+**list-compress-depth 0**
+
+quicklist一般情况下，表头表尾访问频率高，中间节点访问频率低。
+
+可以通过list-compress-depth配置来控制除链表表头表尾几个节点外，其他节点均压缩
+
+- 0：表示节点均不压缩。默认
+- -1：表示quicklist表头表尾各一个节点不压缩，中间节点都压缩。-2，-3依次类推
+
+**压缩算法**：LZF-一种无损压缩算法
+
+##### 3.2.3 quicklist结构
+
+```c
+typedef struct quicklistNode {    
+  struct quicklistNode *prev;    
+  struct quicklistNode *next;    
+  unsigned char *zl;    
+  unsigned int sz;             /* ziplist size in bytes */    
+  unsigned int count : 16;     /* count of items in ziplist */    
+  unsigned int encoding : 2;   /* RAW==1 or LZF==2 */    
+  unsigned int container : 2;  /* NONE==1 or ZIPLIST==2 */    
+  unsigned int recompress : 1; /* was this node previous compressed? */    
+  unsigned int attempted_compress : 1; /* node can't compress; too small */    
+  unsigned int extra : 10; /* more bits to steal for future usage */
+} quicklistNode;
+
+typedef struct quicklistLZF {    
+  unsigned int sz; /* LZF size in bytes*/    
+  char compressed[];
+} quicklistLZF;
+
+typedef struct quicklist {    
+  quicklistNode *head;    
+  quicklistNode *tail;    
+  unsigned long count;        /* total count of all entries in all ziplists */    
+  unsigned int len;           /* number of quicklistNodes */    
+  int fill : 16;              /* fill factor for individual nodes */    
+  unsigned int compress : 16; /* depth of end nodes not to compress;0=off */
+} quicklist;
+```
+
+quicklistNode结构代表quicklist的一个节点，其中各个字段的含义如下：
+
+- prev: 指向链表前一个节点的指针。
+- next: 指向链表后一个节点的指针。
+- zl: 数据指针。如果当前节点的数据没有压缩，那么它指向一个ziplist结构；否则，它指向一个quicklistLZF结构。
+- sz: 表示zl指向的ziplist的总大小（包括`zlbytes`, `zltail`, `zllen`, `zlend`和各个数据项）。需要注意的是：如果ziplist被压缩了，那么这个sz的值仍然是压缩前的ziplist大小。
+- count: 表示ziplist里面包含的数据项个数。这个字段只有16bit。稍后我们会一起计算一下这16bit是否够用。
+- encoding: 表示ziplist是否压缩了（以及用了哪个压缩算法）。目前只有两种取值：2表示被压缩了（而且用的是[LZF](http://oldhome.schmorp.de/marc/liblzf.html)压缩算法），1表示没有压缩。
+- container: 是一个预留字段。本来设计是用来表明一个quicklist节点下面是直接存数据，还是使用ziplist存数据，或者用其它的结构来存数据（用作一个数据容器，所以叫container）。但是，在目前的实现中，这个值是一个固定的值2，表示使用ziplist作为数据容器。
+- recompress: 当我们使用类似lindex这样的命令查看了某一项本来压缩的数据时，需要把数据暂时解压，这时就设置recompress=1做一个标记，等有机会再把数据重新压缩。
+- attempted_compress: 这个值只对Redis的自动化测试程序有用。我们不用管它。
+- extra: 其它扩展字段。目前Redis的实现里也没用上。
 
 #### 3.3 哈希表
 

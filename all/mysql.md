@@ -121,6 +121,14 @@ sql查询之前会进行查询优化。explain可以查看sql语句执行计划�
 >
 > mysql> show engines;
 
+InnoDB与Myisam区别
+
+- innodb支持事务，外键，myisam不支持
+- innodb支持行级锁，myisam不支持
+- innodb每次统计数据行数时(count(*))需要查询数据，myisam不需要（不能携带条件）
+- innodb数据和索引存放在同一个文件，myisam存在在两个文件
+- mysql5.5之前默认Myisam，之后默认Innodb
+
 ## 二、环境说明
 
 ### 1 文件结构
@@ -594,7 +602,7 @@ checkPoint分类
 
 通过`innodb_flush_log_at_tx_commit`控制落盘策略，参考2.2.3
 
-#### 3 落盘流程图
+### 3 落盘流程图
 
 ![image-20210131191418732](../image/InnoDB数据落盘流程.png)
 
