@@ -60,7 +60,7 @@
 
 > Used_memory和used_memory_rss的区别：
 >
-> 前置是从redis角度得到的量，后者从操作系统得到的量。一方面可能因为后者redis进程和内存碎片的存在，导致前者比后者小；另一方面因为前者虚拟内存的存在，导致前者比后者大
+> 前者是从redis角度得到的量，后者从操作系统得到的量。一方面可能因为后者redis进程和内存碎片的存在，导致前者比后者小；另一方面因为前者虚拟内存的存在，导致前者比后者大
 
 **mem_fragmentration_ration**
 
@@ -70,7 +70,7 @@
 
 若该值小于1，说明使用了虚拟内存。而虚拟内存的媒介是磁盘，比内存速度慢得多。若出现这种情况应该及时排查，如果内存不足应及时增加redis内存，增加redis节点，优化等
 
-一般来说`mem_fragmentration_ration`为1.03时比较健康的状态。redis刚启动时可能比较大，因为还没想redis中存入数据，redis进程本身占用一定的内存
+一般来说`mem_fragmentration_ration`为1.03时比较健康的状态。redis刚启动时可能比较大，因为还没向redis中存入数据，redis进程本身占用一定的内存
 
 **mem_allocator**
 
@@ -128,7 +128,7 @@ redis是key-value型数据库，每个键值对都会有一个dictEntry
 
 #### 查看引用数量
 
- object refcound {key} // 查看key的引用数量
+ object refcount {key} // 查看key的引用数量
 
 > int、string对象不共享
 
@@ -182,9 +182,78 @@ object idletime {key}
 - 元素个数小于等于512
 - 保存的元素长度都不超过64
 
-在3.2版本之后，只有quicklist，quickList由linkedList和zipList组成，每个节点都是一个压缩列表节点，且存在前后指针
-
 > rpush {key} {value1} {value2} ...   创建并保存list
+
+##### 3.2.1 quicklist
+
+> zipList存储在一段连续的内存中，存储效率高，节省空间。但对于修改操作麻烦，对于插入和删除操作，都可能需要移动数据，进程内存申请和释放，导致大量的数据拷贝
+>
+> linkedList便宜表两段的pop和push操作，插入复杂度低。但存储效率不高，每个节点需要额外存储两个指针；其次，双向链表每个节点是单独的内存块，地址不连续，可能产生更多的内存碎片
+
+在3.2版本之后，列表的底层实现改为quicklist，quickList由linkedList和zipList组成，每个节点都是一个压缩列表节点，且存在前后指针
+
+##### 3.2.2 redis配置
+
+**list-max-ziplist-size -2**
+
+该配置取正时，表示限制每个ziplist节点的长度。若为5表示每个节点上最多有5条数据
+
+该配置取负时，表示限制每个ziplist节点的大小。-1=4K，-2=8K，-3=16K，-4=32K，-5=64K。默认-2
+
+**list-compress-depth 0**
+
+quicklist一般情况下，表头表尾访问频率高，中间节点访问频率低。
+
+可以通过list-compress-depth配置来控制除链表表头表尾几个节点外，其他节点均压缩
+
+- 0：表示节点均不压缩。默认
+- -1：表示quicklist表头表尾各一个节点不压缩，中间节点都压缩。-2，-3依次类推
+
+**压缩算法**：LZF-一种无损压缩算法
+
+##### 3.2.3 quicklist结构
+
+```c
+typedef struct quicklistNode {    
+  struct quicklistNode *prev;    
+  struct quicklistNode *next;    
+  unsigned char *zl;    
+  unsigned int sz;             /* ziplist size in bytes */    
+  unsigned int count : 16;     /* count of items in ziplist */    
+  unsigned int encoding : 2;   /* RAW==1 or LZF==2 */    
+  unsigned int container : 2;  /* NONE==1 or ZIPLIST==2 */    
+  unsigned int recompress : 1; /* was this node previous compressed? */    
+  unsigned int attempted_compress : 1; /* node can't compress; too small */    
+  unsigned int extra : 10; /* more bits to steal for future usage */
+} quicklistNode;
+
+typedef struct quicklistLZF {    
+  unsigned int sz; /* LZF size in bytes*/    
+  char compressed[];
+} quicklistLZF;
+
+typedef struct quicklist {    
+  quicklistNode *head;    
+  quicklistNode *tail;    
+  unsigned long count;        /* total count of all entries in all ziplists */    
+  unsigned int len;           /* number of quicklistNodes */    
+  int fill : 16;              /* fill factor for individual nodes */    
+  unsigned int compress : 16; /* depth of end nodes not to compress;0=off */
+} quicklist;
+```
+
+quicklistNode结构代表quicklist的一个节点，其中各个字段的含义如下：
+
+- prev: 指向链表前一个节点的指针。
+- next: 指向链表后一个节点的指针。
+- zl: 数据指针。如果当前节点的数据没有压缩，那么它指向一个ziplist结构；否则，它指向一个quicklistLZF结构。
+- sz: 表示zl指向的ziplist的总大小（包括`zlbytes`, `zltail`, `zllen`, `zlend`和各个数据项）。需要注意的是：如果ziplist被压缩了，那么这个sz的值仍然是压缩前的ziplist大小。
+- count: 表示ziplist里面包含的数据项个数。这个字段只有16bit。稍后我们会一起计算一下这16bit是否够用。
+- encoding: 表示ziplist是否压缩了（以及用了哪个压缩算法）。目前只有两种取值：2表示被压缩了（而且用的是[LZF](http://oldhome.schmorp.de/marc/liblzf.html)压缩算法），1表示没有压缩。
+- container: 是一个预留字段。本来设计是用来表明一个quicklist节点下面是直接存数据，还是使用ziplist存数据，或者用其它的结构来存数据（用作一个数据容器，所以叫container）。但是，在目前的实现中，这个值是一个固定的值2，表示使用ziplist作为数据容器。
+- recompress: 当我们使用类似lindex这样的命令查看了某一项本来压缩的数据时，需要把数据暂时解压，这时就设置recompress=1做一个标记，等有机会再把数据重新压缩。
+- attempted_compress: 这个值只对Redis的自动化测试程序有用。我们不用管它。
+- extra: 其它扩展字段。目前Redis的实现里也没用上。
 
 #### 3.3 哈希表
 
@@ -200,7 +269,7 @@ object idletime {key}
 当以下两个条件同时满足时使用intset，否则使用hashtable
 
 - 所有元素都是整数类型
-- 不超过521个元素
+- 不超过512个元素
 
 > sadd {key} {member1} {member2}...    设置set
 >
@@ -219,7 +288,7 @@ object idletime {key}
 
 #### 1.1 RDB
 
-rdb是redis默认的持久化方式，通过快照的方式保存数据库中所有的键值对。当满足一定的条件时，redis进行rdb备份，将内存中的数据备份到rdb文件中
+rdb是redis默认的持久化方式，通过快照的方式保存数据库中所有的键值对（每次备份全量数据）。当满足一定的条件时，redis进行rdb备份，将内存中的数据备份到rdb文件中
 
 **触发rdb快照的时机**
 
@@ -488,7 +557,7 @@ GEORADIUSBYMEMBER cities shanghai 200 km #距离指定元素小于200km的元素
 
 以更抽象的方式建模的日志结构，可以用作基于内存的mq，速度较快。可用作通信、大数据分析、异步数据备份等
 
-有消息、生产者、消费者、消费者组成。同一消费者组消费相同的消息流，不同消费组都消费全量消息
+有消息、生产者、消费者、消费者组组成。同一消费者组消费相同的消息流，不同消费组都消费全量消息
 
 ```shell
 # 发布消息
@@ -672,12 +741,12 @@ private static Config config = new Config();
 
 #### 7.3 限制redis内存的大小
 
-maxmory表示，默认redis的内存大小为0，即不限制其他小，可能导致redis因内存不足而使用虚拟内存（依赖磁盘提供），操作卡顿
+maxmory表示，默认redis的内存大小为0，即不限制其大小，可能导致redis因内存不足而使用虚拟内存（依赖磁盘提供），操作卡顿
 
 redis内存满时，使用内存淘汰策略，共8种。maxmemory-policy 属性配置
 
 - Noevication：默认，不淘汰任何键值，当内存不足时新增指令报错
-- Allkeys-lru: 对所有键，采用最近最近未使用使用策略淘汰
+- Allkeys-lru: 对所有键，采用最近未使用使用策略淘汰
 - Allkeys-randon: 对所有键随机淘汰
 - Volatile-lru: **通用**。对设置了过期时间的键，采用最近最近未使用使用策略淘汰
 - Volitile-random: 对设置了过期时间的键随机淘汰
@@ -686,7 +755,7 @@ redis内存满时，使用内存淘汰策略，共8种。maxmemory-policy 属性
 4.0新增
 
 - allkeys-lfu：对所有键，淘汰最近最少使用的键
-- volitile-lfu
+- volitile-lfu：仅对设置了过期时间的键，淘汰最近最少使用的键
 
 #### 7.4 使用lazy free
 
@@ -936,13 +1005,175 @@ redis客户端在springboot1.5.x默认Jedis实现，在springboot2.x默认lettuc
 
 setnx key value
 
-当key不存在时设置
+当key存在时返回0，当key不存在时返回1
 
 #### 11.2 setex
 
 setex key second value
 
 设置key，同时添加过期时间second
+
+#### 11.3 set key value [EX seconds | PX millseconds | KEEPTTL] [NX|XX]
+
+redis2.6.2版本新增
+
+- ex：设置过期时间，单位秒
+- px：设置过期时间，单位毫秒
+- KEEPTTL：不设置过期时间。默认
+- NX：不存在即设置
+- XX：存在即设置
+
+set key value px timeout nx ：当键不存在时设置，超时时间为timeout，单位毫秒
+
+#### 11.4 过期时间
+
+> Redis为每个键保存对应的过期时间戳，单位毫秒
+
+**Time**：结果中第一行为当前时间戳（单位秒），第二行为当前微秒数
+
+expire \<key> \<ttl>： 将key的剩余生存时间设置为ttl秒。pexpire单位为毫秒
+
+expireat \<key> \<timestamp>：将key设置为timestamp秒过期。pexpireat单位为毫秒
+
+```redis
+127.0.0.1:6379> set k1 v1
+OK
+127.0.0.1:6379> ttl k1
+(integer) -1
+127.0.0.1:6379> TIME
+1) "1616690933"
+2) "495525"
+127.0.0.1:6379> expire k1 1616691033
+(integer) 1
+127.0.0.1:6379> ttl k1
+(integer) 1616691031
+127.0.0.1:6379> expireat k1 1616691033
+(integer) 1
+127.0.0.1:6379> ttl k1
+(integer) 70
+```
+
+### 12. 分布式锁
+
+https://juejin.cn/post/6844903830442737671
+
+> 当需要对一个任务实现分布式加锁的话，因为是多台机器通过本地加锁无法实现，需要实现分布式锁。分布式锁可以通过mysql、redis、zookeeper实现
+
+#### 12.1 redis分布式锁实现-加锁
+
+##### 12.1.1 setnx + expire实现（错误）
+
+先获取锁，在通过expire设置过期时间，这样不具有原子性，可能setnx成功，expire因为指令异常或重启导致指令执行失败，key无法过期
+
+##### 12.1.2 使用lua脚本（结合setnx和expire）
+
+```java
+public boolean tryLock_with_lua(String key, String UniqueId, int seconds) {
+    String lua_scripts = "if redis.call('setnx',KEYS[1],ARGV[1]) == 1 then" +
+            "redis.call('expire',KEYS[1],ARGV[2]) return 1 else return 0 end";
+    List<String> keys = new ArrayList<>();
+    List<String> values = new ArrayList<>();
+    keys.add(key);
+    values.add(UniqueId);
+    values.add(String.valueOf(seconds));
+    Object result = jedis.eval(lua_scripts, keys, values);
+    //判断是否成功
+    return result.equals(1L);
+}
+
+```
+
+##### 12.1.3 使用set px nx原子命令
+
+```java
+public boolean tryLock_with_set(String key, String UniqueId, int seconds) {
+    return "OK".equals(jedis.set(key, UniqueId, "NX", "EX", seconds));
+}
+```
+
+#### 12.2 redis分布式锁实现-解锁
+
+> 当客户端1获取锁成功，因阻塞太长时间导致锁过期；客户端2获取到了统一资源的锁，然后客户端1恢复释放锁，造成客户端2无锁。所以直接使用del可能出现错误
+
+应该锁删除时，判断一下是否为本线程只有的锁。设置锁的值为UUID，删除时判断，通过lua实现
+
+```java
+public boolean releaseLock_with_lua(String key,String value) {
+    String luaScript = "if redis.call('get',KEYS[1]) == ARGV[1] then " +
+            "return redis.call('del',KEYS[1]) else return 0 end";
+    return jedis.eval(luaScript, Collections.singletonList(key), Collections.singletonList(value)).equals(1L);
+}
+```
+
+#### 12.3 Redlock算法
+
+> 当使用分布式锁时，Redis部署的是主从或集群，当锁设置到master中，在master未同步到slave时宕机了，导致slave切换成master却丢失分布式锁
+
+采用RedLock解决该问题，redlock原子命令实现：set nx px
+
+多节点实现的分布式算法（RedLock）：可有效减少单点故障
+
+1. 获取当前时间戳
+2. client尝试获取所有Redis实例中key、value的锁（串行获取，获取完一个获取下一实例），通过set nx px。在获取锁的过程中，等待时间要远小于键的TTL时间，不要过长时间等待已过期的key
+3. client通过获取锁的锁后时间减去第一步时间，这个时间差要小于TTL时间且超过一半的Redis实例获取锁成功(N/2+1)，才能算锁获取成功
+4. 若成功获取锁，锁的真正有效时间为TTL - 获取锁的时间 (获取最后一个机器锁时间 - 第一步时间)- 时钟漂移
+5. 若获取失败，偏会解锁所有redis实例
+
+**时钟漂移**：机器因为地理位置的不同产生的时钟时间差
+
+**RedLock失败重试**：当client不能获取锁时，应在随机时间后进行重试，有一定重试次数限制
+
+**RedLock释放锁**：当获取分布式锁失败则释放锁。释放锁时判断Redis中key对应的value是否和释放锁时的value相等，相等才释放，因此只要发出释放锁的命令，无需关注结果
+
+**RedLock问题**：RedLock只是有效解决了单点故障，但不能完全避免单点故障。比如5个节点，成功获取3个节点锁，其中1个节点宕机为成功同步slave，第二个任务还可以成功获取另外三个机器锁，实现获取两次分布式锁，未达成互斥的目的
+
+**RedLock要求**
+
+1. TTL时长要大于锁业务执行时间+获取所有Redis锁时长+时钟漂移
+2. 获取Redis锁等待超时应远小于TTL时长
+3. 获取Redis失败要有一定重试次数，当获取一般Redis锁成功之后本次获取分布式锁才算成功：N/2+1
+4. Redis崩溃后，要延迟TTL后再重启redis
+
+#### 12.4 Redisson实现
+
+Jedis时Redis的java客户端，是阻塞式I/O，而Redisson底层可使用Netty实现非阻塞I/O，该客户端封装了锁
+
+1、加入pom依赖
+
+```xml
+<dependency>
+    <groupId>org.redisson</groupId>
+    <artifactId>redisson</artifactId>
+    <version>3.10.6</version>
+</dependency>
+```
+
+2、使用Redisson
+
+```java
+// 1. 配置文件
+Config config = new Config();
+config.useSingleServer()
+        .setAddress("redis://127.0.0.1:6379")
+        .setPassword(RedisConfig.PASSWORD)
+        .setDatabase(0);
+//2. 构造RedissonClient
+RedissonClient redissonClient = Redisson.create(config);
+
+//3. 设置锁定资源名称
+RLock lock = redissonClient.getLock("redlock");
+lock.lock();
+try {
+    System.out.println("获取锁成功，实现业务逻辑");
+    Thread.sleep(10000);
+} catch (InterruptedException e) {
+    e.printStackTrace();
+} finally {
+    lock.unlock();
+}
+```
+
+具体实现细节：https://mp.weixin.qq.com/s/8uhYult2h_YUHT7q7YCKYQ
 
 ## 四、面试题
 

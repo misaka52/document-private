@@ -35,9 +35,9 @@
 
 **Master Thread**：一个核心的后台线程，主要负责将缓冲池的数据异步刷新到磁盘，保证数据的唯一性。包括脏页的刷新、合并插入缓冲、undo页的回收
 
-**IO Thread**：InnoDB中大量使用了AIO(Async IO)来处理IO请求，可以极大提高数据库性能。IO Thread主要负责这些IO请求的回调处理。从InnoDB1.0.x开始，IO thread包含log thread和insert buffer thread各一个，read、write线程各四个，读写线程数可通过便令控制调整
+**IO Thread**：InnoDB中大量使用了AIO(Async IO)来处理IO请求，可以极大提高数据库性能。IO Thread主要负责这些IO请求的回调处理。从InnoDB1.0.x开始，IO thread包含log thread和insert buffer thread各一个，read、write线程各四个，读写线程数可通过变量调整
 
-**Purge Thread**：回收已经使用并分配的undo页（事务被提交后，其使用的undolog可能不在需要）。InnoDB1.1之前通过master thread回收undo页，InnoDB1.1开始分离出purge thread单独回收undo页，分散master的压力。purge thread数量默认为1，InnoDB1.1当设置大于1也自动调整成1.InnoDB1.2支持purge线程数动态调整，变量`innodb_purge_threads`
+**Purge Thread**：回收已经使用并分配的undo页（事务被提交后，其使用的undolog可能仍然需要）。InnoDB1.1之前通过master thread回收undo页，InnoDB1.1开始分离出purge thread单独回收undo页，分散master的压力。purge thread数量默认为1，InnoDB1.1当设置大于1也自动调整成1.InnoDB1.2支持purge线程数动态调整，变量`innodb_purge_threads`
 
 **Page Cleaner Thread**：InnoDB1.2.x版本引入，脏页的刷新操作交给这个线程单独处理，为减轻master thread压力
 
@@ -130,7 +130,7 @@ insert buffer合并到辅助索引中的，触发时机如下
 
 带给存储引擎数据页的可靠性。当写入部分数据时机器宕机，导致部分写失效。
 
-Innodb引擎的默认页大小是16KB，而操作系统的文件写入是以4KB为单位，当对一个页写入磁盘时，只写入了一部分（比如4/16）mysql挂了，该页只有一部分写入到磁盘中了。当使用redolog进行恢复时，会检查该页的checksum（checksum表示最后事务号），而改页已经损坏找不到checksum，无法进行重做恢复
+Innodb引擎的默认页大小是16KB，而操作系统的文件写入是以4KB为单位，当对一个页写入磁盘时，只写入了一部分（比如4/16）mysql挂了，该页只有一部分写入到磁盘中了。当使用redolog进行恢复时，会检查该页的checksum（checksum表示最后事务号），而该页已经损坏找不到checksum，无法进行重做恢复
 
 double write流程
 
@@ -171,7 +171,7 @@ AIO的另一优势是可以进行IO merge，比如需要访问页(8,6) (8,7) (8,
 - 是不是可能将不怎么脏的页刷新到磁盘，不就该页又变为脏页
 - 固态硬盘具有比较高的IOPS(input/ouput operation Per Second，每秒磁盘输入输出)，不建议开启此功能
 
-在innodb1.2.x，通过参数`innodb_flush_neighbors`控制是否开启刷新邻接页功能
+在innodb1.2.x，通过参数`innodb_flush_neighbors`控制是否开启刷新邻接页功能，默认1开启
 
 ### 5 启动、关闭与恢复
 
@@ -228,7 +228,7 @@ long_query_time=10 // 慢查询日志阙值（秒）
 
 binlog日志格式(建议默认设置ROW，当执行影响范围大的sql的时临时改为STATEMENT)：
 - STATEMENT格式，记录日志逻辑sql语句，即sql语句；
-- ROW格式（文件更大），记录修改后发生变化的每行数据；
+- ROW格式（文件更大），记录修改后发生变化的每行数据（记录数据每列的新老数据，不管是否变更）
 - MIX格式，混用前两种格式
 
 当使用事务的存储引擎时，所有未提交的二进制日志都会保存到一个会话级别的缓存中，当事务提交时将缓存中的二进制日志刷新到二进制文件中。缓冲大小由参数`binlog_cache_size`控制，默认32K，当事务中需要缓存的数据大于该值时，会通过建立临时文件存储，但会使得流程变慢。索引缓存大小不能过小。可通过状态属性`Binlog_cache_use`binlog缓存使用总次数，`Binlog_cache_disk_use` 表示使用binlog缓存时建立临时文件的次数
@@ -722,8 +722,6 @@ $$
 - 锁资源占用的内存超过了激活内的40%就会发生锁升级
 
 存储引擎不存在锁升级，它不是根据记录产生行锁的，而是根据事务访问的每个页对锁进行管理的，采用位图的方式
-
-
 
 ## 第7章 事务
 
