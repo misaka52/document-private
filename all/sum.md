@@ -311,3 +311,7 @@
 4. 过滤器和拦截器的区别：过滤器是servlet的，拦截所有资源，包括静态资源；拦截器是spring的，拦截所有请求，可以获取bean，基于反射实现
 5. start包自动加载：springboot启动类自带注解@SpringBootApplication，内包含注解@EnableAutoConfiguration，注解实现自动扫描所有jar包下META-INF/spring.factories文件，扫描文件中key为org.springframework.boot.autoconfigure.EnableAutoConfiguration的所有值，扫描所有AutoConfiguration类，把生效的bean载入到spring容器中
 
+## 设计模式
+
+1. 创建型、行为型、结构性
+2. 责任链
