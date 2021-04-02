@@ -1228,5 +1228,5 @@ try {
     
 15. Setnx：当key不存在时设置
 
-16. Setex
+16. Setex：
 
