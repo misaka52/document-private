@@ -1080,7 +1080,6 @@ public boolean tryLock_with_lua(String key, String UniqueId, int seconds) {
     //判断是否成功
     return result.equals(1L);
 }
-
 ```
 
 ##### 12.1.3 使用set px nx原子命令
@@ -1113,11 +1112,11 @@ public boolean releaseLock_with_lua(String key,String value) {
 
 多节点实现的分布式算法（RedLock）：可有效减少单点故障
 
-1. 获取当前时间戳
-2. client尝试获取所有Redis实例中key、value的锁（串行获取，获取完一个获取下一实例），通过set nx px。在获取锁的过程中，等待时间要远小于键的TTL时间，不要过长时间等待已过期的key
+1. 获取当前时间戳，计算过期时间戳
+2. client尝试获取所有Redis实例中key、value的锁，通过set nx px。在获取锁的过程中，等待时间要远小于键的TTL时间，不要过长时间等待已过期的key
 3. client通过获取锁的锁后时间减去第一步时间，这个时间差要小于TTL时间且超过一半的Redis实例获取锁成功(N/2+1)，才能算锁获取成功
-4. 若成功获取锁，锁的真正有效时间为TTL - 获取锁的时间 (获取最后一个机器锁时间 - 第一步时间)- 时钟漂移
-5. 若获取失败，偏会解锁所有redis实例
+4. 若成功获取锁，锁的真正有效时间为TTL - 获取锁的时间 - 时钟漂移
+5. 若获取失败，会解锁所有redis实例
 
 **时钟漂移**：机器因为地理位置的不同产生的时钟时间差
 

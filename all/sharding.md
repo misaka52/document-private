@@ -201,4 +201,9 @@ select * from table limit 0, {a+b}
 | SELECT * FROM tbl_name1 UNION ALL SELECT * FROM tbl_name2    | union all                                                    |
 | SELECT * FROM ds.tbl_name1                                   | 包含schema                                                   |
 | SELECT SUM(DISTINCT col1), SUM(col1) FROM tbl_name           | 使用普通聚合函数和DISTINCT函数                               |
+| SELECT * FROM tbl_name WHERE to_date(create_time, ‘yyyy-mm-dd’) = ? | 不支持函数动态计算，导致全路由                               |
 
+- 不支持timeout相关操作
+- 不支持存储过程、函数、游标操作
+- 不支持savepoint
+- 不支持多结果的语句（即存储过程，非select多条数据）
