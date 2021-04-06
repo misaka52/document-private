@@ -28,6 +28,20 @@
     1. 类加载流程：加载、验证、准备、解析、初始化
     2. 类加载机制：双亲委派机制。优势：避免类重复加载，加载过不会再加载；避免核心类库被修改
 
+### Spring
+
+1. spring功能简介
+2. springboot bean自动装配机制
+3. spring用到了哪几种设计模式
+   1. 工厂模式。可通过BeanFactory或ApplicationContext创建bean对象
+   2. 单例模式。bean默认都是单例。五种实现
+   3. 代理模式。动态代理：jdk代理和cglib代理
+   4. 模板方法模式。spring中设置了一套公用的模板，根据不同的实现类的调用不同方法
+   5. 观察者模式。ApplicationEvent充当事件的角色，ApplicationListener充当事件监听者角色，分别继承这两个类，实现applicationContext配置更新动态监听
+      1. `ContextStartedEvent`：`ApplicationContext` 启动后触发的事件;
+      2. `ContextStoppedEvent`：`ApplicationContext` 停止后触发的事件;
+   6. 适配器模式。如springmvc中根据handler获取handlerAdapter
+
 ### jvm
 
 1. 内存区域？jdk1.8元空间？
@@ -91,6 +105,9 @@
    1. 并发量大时可能存在，未压测复现该问题？？
 9. select * 和select 列表区别，及内部原理实现区别？
    1. ？？？
+10. 数据库连接池
+    1. 管理数据库连接，数据库连接需要与数据库建立TCP连接
+    2. 官方推荐使用hikari，hikari性能最好，druid在监控方便做的较好
 
 ### RocketMQ
 

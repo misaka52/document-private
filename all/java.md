@@ -88,3 +88,123 @@ posi = Hash(key) % size，实现简单
 当服务器节点数量较少时，比如两个，可能造成数据倾斜于其中一个节点（hash值差距不大），造成数据分配的不均匀
 
 解决办法：采用多次hash，为每个服务器生成多个虚拟节点，这些虚拟节点存储方式和真实节点类似，不过虚拟节点最终还要定位到正式节点上，一般每台机器的虚拟节点数32甚至更大，使数据分配的更加均匀。比如服务器A，生成三个虚拟节点A1，A2，A3
+
+## 流
+
+> java8新特性
+
+stream操作分类
+
+**中间操作**：指中间操作
+
+- 有状态：必须等待上一步执行完成得到全部的结果才能执行，比如sort
+- 无状态：无需等待上一步执行的全部结果，来一个处理一个
+
+**终止操作**：数据流的终止，数据收集
+
+- 短路操作：在满足条件时即可终止，无需等待上一步的全部元素。如anyMatch，findFirst等
+- 非短路操作：必须等待上一步执行的全部元素，如collect，max，foreach等
+
+### 1. 理论
+
+对于实现一个列表一连串的功能，比如过滤，排序，转化，结果收集，如果一个功能一个功能写，需要执行多次迭代，并且会频繁生成中间结果
+
+通过stream操作，可以实现，流水线操作，针对每个元素，记录中间操作，直到遇到终止操作再停止执行记录的操作。解决上述两个问题
+
+stream流优势
+
+1. 代码精简，解耦
+2. 减少循环迭代
+3. 减少中间的生成
+
+```java
+List<Integer> list = new ArrayList<Integer>(){{
+            add(212);
+            add(22);
+            add(2);
+            add(2112);
+        }};
+        list.stream()
+                .map(a -> {
+                    System.out.println("map");
+                    return a + 1;
+                })
+                .filter(a -> {
+                    System.out.println("filter");
+                    return a > 100;
+                })
+                .forEach(System.out::println);
+//// 输出
+map
+filter
+213
+map
+filter
+map
+filter
+map
+filter
+2113
+```
+
+### 2. 实践
+
+#### sorted
+
+```java
+List<Integer> list = new ArrayList<Integer>(){{
+            add(212);
+            add(22);
+            add(2);
+            add(2112);
+        }};
+        list.stream()
+                .sorted((a, b) -> a - b)
+                .forEach(System.out::println);
+```
+
+#### reduce
+
+对流中元素按照运算规则计算。第一个入参为初始值
+
+```java
+System.out.println(Stream.of("A", "B", "C", "D")
+                .reduce("-", String::concat));
+System.out.println(Stream.of(1, 0, 29, 5)
+                   .reduce(0, (a, b) -> a - b));
+System.out.println(Stream.of(1, 0, 29, 5)
+                   .reduce(0, (a, b) -> Math.max(a, b)));
+
+//结果
+-ABCD
+-35
+29
+```
+
+#### map/flatmap
+
+Map: 按照输入元素一一映射为新元素
+
+flagMap: 把多个流集合在一起
+
+```java
+// map
+List<Integer> list = new ArrayList<Integer>(){{
+            add(212);
+            add(22);
+            add(2);
+            add(2112);
+        }};
+list.stream()
+  .map(a -> -a)
+  .forEach(System.out::println);
+
+// flatmap
+Stream<List<Integer>> stream = Stream.of(
+                Arrays.asList(1, 2, 3),
+                Arrays.asList(1, 3),
+                Arrays.asList(11, 3)
+        );
+        stream.flatMap(a -> a.stream()).forEach(System.out::println);
+```
+

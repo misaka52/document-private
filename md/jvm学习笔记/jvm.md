@@ -1182,7 +1182,7 @@ sh-4.2# jmap -histo 6 | head -20
 ##### 1.3 获取dump文件
 
 1. jmap -dump:format=b,file=[文件名] [pid]，获取在线进程dump快照信息
-2. jvm参数中添加-XX:+HeapDumpOnOutOfMemoryError(默认不开启)，当应用OOM时生成dump自动生成OOM文件。配合参数-XX:HeapDumpPath=${目录}指定dump文件地址路径。也可指定文件名称${目录}/java_heapdump.hprof，如果不指定文件名，默认为：java\_\<pid>\_\<date>\_\<time>_heapDump.hprof，默认目录为tomcat所在目录下。
+2. jvm参数中添加-XX:+HeapDumpOnOutOfMemoryError(默认不开启)，当应用OOM时生成dump自动生成OOM文件。配合参数-XX:HeapDumpPath=${目录}指定dump文件地址路径。也可指定文件名称${目录}/java_heapdump.hprof，如果不指定文件名，默认为：java\_pid\<pid>.hprof，默认目录为tomcat所在目录下。
 
 ##### 1.4 分析dump文件
 
