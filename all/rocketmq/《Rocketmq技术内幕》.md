@@ -1205,6 +1205,8 @@ Master服务端HA连接对象的封装
 
 实现TransactionListener监听器即可。一个执行本地事务的方法，一个回查本地事务的方法。建议将MsgId保存入库记录事务状态
 
+> 每个执行任务会有三种结果：未知、提交、回滚。当返回未知时，broker会再次通过定时回查
+
 ### 8.2 发送消息
 实现类TransactionMQProducer
 1. 发送prepare消息。添加消息属性TRAN_MSG(true表示prepare消息)和PGROUP(原消息生产者组)
