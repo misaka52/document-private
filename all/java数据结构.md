@@ -30,6 +30,75 @@ put() 使用hashMap put方法
 new LinkedHashMap<>(16, 0.75f, true);
 ```
 
+### TreeMap
+
+排序map，key构成一棵二叉排序树，
+
+- key必须实现Comparable接口，实现compareTo方法
+
+- key不能为null
+
+#### put
+
+```java
+public V put(K key, V value) {
+        Entry<K,V> t = root;
+        if (t == null) {
+            // 树为空，进行初始化
+            // key不能为空，否则抛出NPE
+            compare(key, key); // type (and possibly null) check
+
+            root = new Entry<>(key, value, null);
+            size = 1;
+            modCount++;
+            return null;
+        }
+        int cmp;
+        Entry<K,V> parent;
+        // split comparator and comparable paths
+        Comparator<? super K> cpr = comparator;
+    	// 判断有无指定比较器，用插入key和树结构节点对比，相同则更新value，表示树中不存在两个相同key
+        if (cpr != null) {
+            do {
+                parent = t;
+                cmp = cpr.compare(key, t.key);
+                if (cmp < 0)
+                    t = t.left;
+                else if (cmp > 0)
+                    t = t.right;
+                else
+                    return t.setValue(value);
+            } while (t != null);
+        }
+        else {
+            if (key == null)
+                throw new NullPointerException();
+            @SuppressWarnings("unchecked")
+                Comparable<? super K> k = (Comparable<? super K>) key;
+            do {
+                parent = t;
+                cmp = k.compareTo(t.key);
+                if (cmp < 0)
+                    t = t.left;
+                else if (cmp > 0)
+                    t = t.right;
+                else
+                    return t.setValue(value);
+            } while (t != null);
+        }
+        Entry<K,V> e = new Entry<>(key, value, parent);
+        if (cmp < 0)
+            parent.left = e;
+        else
+            parent.right = e;
+    	// 红黑树旋转调整以达到平衡
+        fixAfterInsertion(e);
+        size++;
+        modCount++;
+        return null;
+    }
+```
+
 ### ThreadLocal
 
 java.lang.ThreadLocal
