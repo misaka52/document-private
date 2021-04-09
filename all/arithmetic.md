@@ -83,5 +83,11 @@
 ## 其他
 
 1. https://www.nowcoder.com/practice/f33f5adc55f444baa0e0ca87ad8a6aac?tpId=117&tab=answerKey。给定两个字符串str1和str2,输出两个字符串的最长公共子串题目保证str1和str2的最长公共子串存在且唯一。
+
+   ```java
+   dp[i][j]:表示str1下标为i-1，str2下标为j-1的最长公共子串长度
+   dp[i][j]=str1[i-1]==str[j-1]?dp[i-1][j-1]+1:0;
+   ```
+
 2. 
 
