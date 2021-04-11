@@ -89,5 +89,5 @@
    dp[i][j]=str1[i-1]==str[j-1]?dp[i-1][j-1]+1:0;
    ```
 
-2. 
+2. 寻找两个排序数据中，第k大的数，两个数组间无顺序。参考：https://blog.csdn.net/qiki_tangmingwei/article/details/80957855
 

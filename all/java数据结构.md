@@ -16,12 +16,15 @@ jdk8相对于jdk7变化
 
 - 引入了红黑树，对于长链表查询效率更高
 - 在resize时，链表依然按照顺序分配，不再逆序分配（jdk7链表逆序分配，实现简单，但在并发使用时可能产生死循环）
+- 添加元素，jdk8采用尾插法，jdk7采用头插法
 
 ### LinkedHashMap
 
 继承自HashMap，同样也复用hashmap的数组+链表结构，只是新增了一条链表，来表示顺序。新增的节点都放到链表末尾，遍历时从链表头开始遍历，扫描至链表尾部
 
-accessOrder: true表示访问列表为访问数据，false表示列表为插入顺序。LinkedHashMap默认false，表示插入和更新的节点都迁移到链表末尾；当为true时，访问过的元素会迁移到链表末尾
+accessOrder: true表示访问列表为访问数据，false表示列表为插入顺序。LinkedHashMap默认false，表示插入节点都迁移到链表末尾；当为true时，访问过或更新过的元素会迁移到链表末尾
+
+Foreach: 迭代遍历时按照从表头至表尾的顺序遍历节点
 
 put() 使用hashMap put方法
 
@@ -148,6 +151,187 @@ ThreadLocalMap包含实体组数，key为ThreadLocal变量，value为需要存�
 
 ## JUC
 
+### LongAdder
+
+参考：https://segmentfault.com/a/1190000015865714
+
+AtomicLong为线程安全的类，用于支持Long型数据操作，底层通过CAS实现，但是当并发量很高时，CAS效率低下，此时引入LongAdder。LongAdder采用baseCount+cells[]思想，无并发时（cells为null）直接CAS操作baseCount，当存在并发时再更新cells。最后获取结果时，为baseCount+cells[]思想，但统计结果时可能存在其他计算逻辑，所以该值仅仅是估计值。
+
+LongAdder相比AtomicLong，高并发情况下采用热点数据分治的思想以提高性能，高并发下性能优于AtomicLong，但LongAdder只能获得某时刻的近视值，可能获取时部分操作正在进行中，并不能完全代替AtomicLong
+
+**其他兄弟**
+
+- LongAccumulator：为LongAdder的增强版，解决了其只支持加减运算局限。通过LongBinaryOperator可以自定义对参数的任何操作
+- DoubleAdder和DoubleAccumulator：和LongAdder、LongAccumulator类似，其内部通过一定方法将double转换成long类型，其余操作与LongAdder一样
+
+#### 1. 结构
+
+```java
+public class LongAdder extends Striped64 implements Serializable {
+  public LongAdder() {
+    }
+}
+
+abstract class Striped64 extends Number {
+    // 并发时热点分组数据，可扩容，最大为CPU数量
+    transient volatile Cell[] cells;
+  	// 非并发情况下操作数据
+    transient volatile long base;
+  	// cells[]加锁标识。当cells初始化或扩容设置为1，否则为0
+    transient volatile int cellsBusy;
+  
+  private static final sun.misc.Unsafe UNSAFE;
+    private static final long BASE;
+    private static final long CELLSBUSY;
+    private static final long PROBE;
+    static {
+        try {
+            UNSAFE = sun.misc.Unsafe.getUnsafe();
+            Class<?> sk = Striped64.class;
+            BASE = UNSAFE.objectFieldOffset
+                (sk.getDeclaredField("base"));
+            CELLSBUSY = UNSAFE.objectFieldOffset
+                (sk.getDeclaredField("cellsBusy"));
+            Class<?> tk = Thread.class;
+            PROBE = UNSAFE.objectFieldOffset
+                (tk.getDeclaredField("threadLocalRandomProbe"));
+        } catch (Exception e) {
+            throw new Error(e);
+        }
+    }
+}
+```
+
+#### 2. add
+
+```java
+public void add(long x) {
+        Cell[] as; long b, v; int m; Cell a;
+  			// cells为空时，cas更新base; 若cells非空或cas更新失败时，进入更新cells操作
+        if ((as = cells) != null || !casBase(b = base, b + x)) {
+            boolean uncontended = true;
+          	// cells未初始化 | cas尝试更新cell[i]的value失败，则进入longAccumulate方法
+            if (as == null || (m = as.length - 1) < 0 ||
+                (a = as[getProbe() & m]) == null ||
+                !(uncontended = a.cas(v = a.value, v + x)))
+                longAccumulate(x, null, uncontended);
+        }
+    }
+
+final void longAccumulate(long x, LongBinaryOperator fn,
+                              boolean wasUncontended) {
+        int h;
+        if ((h = getProbe()) == 0) {
+          	// 计算当前线程更新的hash值，从而得到对应的cells桶
+            ThreadLocalRandom.current(); // force initialization
+            h = getProbe();
+            wasUncontended = true;
+        }
+        boolean collide = false;                // True if last slot nonempty
+        for (;;) {
+            Cell[] as; Cell a; int n; long v;
+          	// case3：cells已经初始化完成
+            if ((as = cells) != null && (n = as.length) > 0) {
+              	// 判断cells[i]是否为空，为空则初始化cells单元格，初始值为x
+                if ((a = as[(n - 1) & h]) == null) {
+                    if (cellsBusy == 0) {       // Try to attach new Cell
+                        Cell r = new Cell(x);   // Optimistically create
+                        if (cellsBusy == 0 && casCellsBusy()) {
+                            boolean created = false;
+                            try {               // Recheck under lock
+                                Cell[] rs; int m, j;
+                                if ((rs = cells) != null &&
+                                    (m = rs.length) > 0 &&
+                                    rs[j = (m - 1) & h] == null) {
+                                    rs[j] = r;
+                                    created = true;
+                                }
+                            } finally {
+                                cellsBusy = 0;
+                            }
+                            if (created)
+                                break;
+                            continue;           // Slot is now non-empty
+                        }
+                    }
+                    collide = false;
+                }
+                else if (!wasUncontended)       // CAS already known to fail
+                    wasUncontended = true;      // Continue after rehash
+              	// 尝试更新cells[i]的值
+                else if (a.cas(v = a.value, ((fn == null) ? v + x :
+                                             fn.applyAsLong(v, x))))
+                    break;
+              	// 当cells[]大小超过cpu核数后，不再进行扩容
+                else if (n >= NCPU || cells != as)
+                    collide = false;            // At max size or stale
+                else if (!collide)
+                    collide = true;
+                else if (cellsBusy == 0 && casCellsBusy()) {
+                  	// 加锁进行扩容
+                    try {
+                        if (cells == as) {      // Expand table unless stale
+                          	// cells[]扩容为原来的两倍
+                            Cell[] rs = new Cell[n << 1];
+                            for (int i = 0; i < n; ++i)
+                                rs[i] = as[i];
+                            cells = rs;
+                        }
+                    } finally {
+                        cellsBusy = 0;
+                    }
+                    collide = false;
+                    continue;                   // Retry with expanded table
+                }
+                h = advanceProbe(h);
+            }
+          	// case1：cells没有加锁且没有初始化，尝试加锁并初始化
+            else if (cellsBusy == 0 && cells == as && casCellsBusy()) {
+                boolean init = false;
+                try {                           // Initialize table
+                    if (cells == as) {
+                      	// 初始化表，初始大小为2
+                        Cell[] rs = new Cell[2];
+                        rs[h & 1] = new Cell(x);
+                        cells = rs;
+                        init = true;
+                    }
+                } finally {
+                    cellsBusy = 0;
+                }
+                if (init)
+                    break;
+            }
+          	// case2：cells正在初始化，尝试直接在base上进行累加操作
+            else if (casBase(v = base, ((fn == null) ? v + x :
+                                        fn.applyAsLong(v, x))))
+                break;                          // Fall back on using base
+        }
+    }
+```
+
+#### 3. 结果统计
+
+得到的结果为某一时刻的近视值，可能存在部分操作正在进行中（初始化、扩容、计算等）
+
+```java
+public long longValue() {
+        return sum();
+    }
+
+public long sum() {
+        Cell[] as = cells; Cell a;
+        long sum = base;
+        if (as != null) {
+            for (int i = 0; i < as.length; ++i) {
+                if ((a = as[i]) != null)
+                    sum += a.value;
+            }
+        }
+        return sum;
+    }
+```
+
 ### ConcurrentHashMap(chm)
 
 Jdk1.7和jdk1.8实现不同
@@ -164,7 +348,7 @@ ConcurrentHashMap结构，分为多个segment段，每个段类都一个HashEntr
 
 核心成员变量
 
-```
+```java
 /**
  * Segment 数组，存放数据时首先需要定位到具体的 Segment 中。
  */
@@ -220,17 +404,11 @@ put方法如下。键或值为空时抛出NPE
 1. 遍历表
 2. 表为空则进行初始化
 3. 若当前桶未初始化，则通过cas进行初始化
-4. 当hash=MOVED=-1时，需要进行扩容
+4. 当hash=MOVED=-1时，表示当前map正在扩容，需要协助扩容
 5. 获取表头锁
 6. 当链表数量大于8则转成红黑树
 
 get方法，无需加锁。可以通过hash<0来识别map正在扩容，需要到nextTable查询结果
-
-扩容
-
-https://www.cnblogs.com/sanzao/p/10792546.html
-
-- 扩容可以并发执行，当进行扩容时标记map为扩容。后续put操作可以帮助扩容
 
 Jdk1.8相对于jdk1.7改动
 
@@ -240,7 +418,7 @@ Jdk1.8相对于jdk1.7改动
 - 扩容时将任务拆分，使用多线程并发执行加快扩容
 - 获取map大小，引入计数器概念（CounterCell数组）直接无锁获取。而jdk1.7需要对所有段加锁。无modCount，1.7还有
 
-> 以下正对jdk1.8开始讨论
+> 以下针对jdk1.8开始讨论
 
 #### 1. ConcurrentHashMap简介
 
@@ -312,6 +490,7 @@ static final class TreeBin<K, V> extends Node<K, V> {
     static final int WRITER = 1;        // 二进制001，红黑树的写锁状态
     static final int WAITER = 2;        // 二进制010，红黑树的等待获取写锁状态
     static final int READER = 4;        // 二进制100，红黑树的读锁状态，读可以并发，每多一个读线程，lockState都加上一个READER值
+  	// hash值固定-2
 }
 ```
 
@@ -465,7 +644,7 @@ private transient volatile Node<K, V>[] nextTable;
  * 0  : 初始默认值
  * -1 : 有线程正在进行table的初始化
  * >0 : table初始化时使用的容量，或初始化/扩容完成后的threshold
- * -(1 + nThreads) : 记录正在执行扩容任务的线程数
+ * <0: 较小的负数，用于记录正在执行扩容任务的线程数
  */
 private transient volatile int sizeCtl;
 
@@ -501,6 +680,7 @@ private transient EntrySetView<K, V> entrySet;
 put方法实现。当key不存在时插入，且插入时使用synchronized锁
 
 ```java
+/**
  * 实际的插入操作
  *
  * @param onlyIfAbsent true:仅当key不存在时,才插入
@@ -615,7 +795,7 @@ private final Node<K, V>[] initTable() {
 
 扩容很复杂，下面讲解
 
-疑问：本次set操作丢失？？？
+疑问：本次put操作丢失？不会，扩容完成后继续在循环内重新计算哈希桶，添加元素
 
 ##### 4.4 出现hash冲突
 
@@ -800,7 +980,7 @@ Node<K, V> find(int h, Object k) {
 
 ##### 5.3 ReversionNode节点的查找
 
-保留节点，不保存实际数据
+保留节点，不保存实际数据。用于comput()和computIfAbsent()方法，插入临时节点
 
 ```java
 Node<K, V> find(int h, Object k) {
@@ -852,7 +1032,7 @@ private transient volatile long baseCount;
 private transient volatile CounterCell[] counterCells;
 
 /**
- * 自旋标识位，用于CounterCell[]扩容时使用。类似于LongAdder的cellsBusy变量
+ * 自旋标识位，用于CounterCell[]扩容或初始化时使用。类似于LongAdder的cellsBusy变量
  */
 private transient volatile int cellsBusy;
 ```
@@ -878,7 +1058,7 @@ addCount具体实现如下
 
 - 首先，若counterCells为null，则表示无竞争，直接baseCount加一
 - 否则，先尝试更新countCells[i]，更新成功则退出，更新失败则涉及到countCells的扩容，调用fullAddCount()
-- 流程和LongAddr类似，参考：https://segmentfault.com/a/1190000015865714
+- 流程和LongAddr类似
 
 ```java
 /**
@@ -924,6 +1104,326 @@ private final void addCount(long x, int check) {
     }
 }
 ```
+
+#### 7. 扩容
+
+1. 扩容时，利用另一表nextTable进行数据迁移，每次扩容hash表增大为原来的两倍，容量阙值为0.75倍的哈希桶大小
+2. 扩容时，若当前未在扩容，则设置sizeCtl为一个较小的负数；若当前map正在扩容，sizeCtl加一，协助扩容
+3. 单线程实际扩容时，以stride长度为一个周期，每个周期迁移原哈希桶[transferIndex-stride, transferIndex-1]上的数据，一个周期迁移完成进行下一周期的迁移。没迁移一个哈希桶位置，都需要添加同步锁，将原表数据同步到新表高位低位两个桶中（先同步，再链接高位低位新链表），迁移完成后在原表哈希桶上放置迁移节点（迁移节点key哈希值为-1）
+4. 等到最后一个线程（通过迁移线程数sizeCtl计算得出）迁移完成，表示本次扩容结束
+
+##### 7.1 扩容时机
+
+当链表过长，尝试转换成红黑树时
+
+```java
+/**
+ * 尝试进行 链表 -> 红黑树 的转换.
+ */
+private final void treeifyBin(Node<K, V>[] tab, int index) {
+    Node<K, V> b;
+    int n, sc;
+    if (tab != null) {
+
+        // CASE 1: table的容量 < MIN_TREEIFY_CAPACITY(64)时，直接进行table扩容，不进行红黑树转换
+        if ((n = tab.length) < MIN_TREEIFY_CAPACITY)
+            tryPresize(n << 1);
+
+            // CASE 2: table的容量 ≥ MIN_TREEIFY_CAPACITY(64)时，进行链表 -> 红黑树的转换
+        else if ((b = tabAt(tab, index)) != null && b.hash >= 0) {
+            synchronized (b) {
+                if (tabAt(tab, index) == b) {
+                    TreeNode<K, V> hd = null, tl = null;
+
+                    // 遍历链表，建立红黑树
+                    for (Node<K, V> e = b; e != null; e = e.next) {
+                        TreeNode<K, V> p = new TreeNode<K, V>(e.hash, e.key, e.val, null, null);
+                        if ((p.prev = tl) == null)
+                            hd = p;
+                        else
+                            tl.next = p;
+                        tl = p;
+                    }
+                    // 以TreeBin类型包装，并链接到table[index]中
+                    setTabAt(tab, index, new TreeBin<K, V>(hd));
+                }
+            }
+        }
+    }
+}
+```
+
+尝试扩容
+
+```java
+/**
+ * 尝试对table数组进行扩容.
+ *
+ * @param 待扩容的大小
+ */
+private final void tryPresize(int size) {
+    // 视情况将size调整为2的幂次
+    int c = (size >= (MAXIMUM_CAPACITY >>> 1)) ? MAXIMUM_CAPACITY : tableSizeFor(size + (size >>> 1) + 1);
+    int sc;
+    while ((sc = sizeCtl) >= 0) {
+        Node<K, V>[] tab = table;
+        int n;
+
+        //CASE 1: table还未初始化，则先进行初始化
+        if (tab == null || (n = tab.length) == 0) {
+            n = (sc > c) ? sc : c;
+          	// 从sc转换成-1
+            if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
+                try {
+                  	// 校验
+                    if (table == tab) {
+                        Node<K, V>[] nt = (Node<K, V>[]) new Node<?, ?>[n];
+                        table = nt;
+                        sc = n - (n >>> 2);
+                    }
+                } finally {
+                    sizeCtl = sc;
+                }
+            }
+        }
+        // CASE2: c <= sc说明已经被扩容过了；n >= MAXIMUM_CAPACITY说明table数组已达到最大容量
+        else if (c <= sc || n >= MAXIMUM_CAPACITY)
+            break;
+            // CASE3: 进行table扩容
+        else if (tab == table) {
+            int rs = resizeStamp(n);    // 根据容量n生成一个随机数，唯一标识本次扩容操作
+            if (sc < 0) {               // sc < 0 表明此时有别的线程正在进行扩容
+                Node<K, V>[] nt;
+
+                // 如果当前线程无法协助进行数据转移, 则退出
+              	// ???什么原理
+                if ((sc >>> RESIZE_STAMP_SHIFT) != rs || sc == rs + 1 ||
+                    sc == rs + MAX_RESIZERS || (nt = nextTable) == null ||
+                    transferIndex <= 0)
+                    break;
+
+                // 协助数据转移, 把正在执行transfer任务的线程数加1
+                if (U.compareAndSwapInt(this, SIZECTL, sc, sc + 1))
+                    transfer(tab, nt);
+            }
+            // sc置为负数, 当前线程自身成为第一个执行transfer(数据转移)的线程
+            // 这个CAS操作可以保证，仅有一个线程会执行扩容
+            else if (U.compareAndSwapInt(this, SIZECTL, sc, (rs << RESIZE_STAMP_SHIFT) + 2))
+                transfer(tab, null);
+        }
+    }
+}
+```
+
+##### 7.2 扩容原理
+
+```java
+/**
+ * 数据转移和扩容.
+ * 每个调用tranfer的线程会对当前旧table中[transferIndex-stride, transferIndex-1]位置的结点进行迁移
+ *
+ * @param tab     旧table数组
+ * @param nextTab 新table数组
+ */
+private final void transfer(Node<K, V>[] tab, Node<K, V>[] nextTab) {
+    int n = tab.length, stride;
+
+    // stride可理解成“步长”，即数据迁移时，每个线程要负责旧table中的多少个桶
+    if ((stride = (NCPU > 1) ? (n >>> 3) / NCPU : n) < MIN_TRANSFER_STRIDE)
+        stride = MIN_TRANSFER_STRIDE;
+
+    if (nextTab == null) {           // 首次扩容
+        try {
+            // 创建新table数组
+            Node<K, V>[] nt = (Node<K, V>[]) new Node<?, ?>[n << 1];
+            nextTab = nt;
+        } catch (Throwable ex) {      // 处理内存溢出（OOME）的情况
+            sizeCtl = Integer.MAX_VALUE;
+            return;
+        }
+        nextTable = nextTab;
+        transferIndex = n;          // [transferIndex-stride, transferIndex-1]表示当前线程要进行数据迁移的桶区间
+    }
+
+    int nextn = nextTab.length;
+
+    // ForwardingNode结点，当旧table的某个桶中的所有结点都迁移完后，用该结点占据这个桶
+    ForwardingNode<K, V> fwd = new ForwardingNode<K, V>(nextTab);
+
+    // 标识一个桶的迁移工作是否完成，advance == true 表示可以进行下一个位置的迁移
+    boolean advance = true;
+
+    // 最后一个数据迁移的线程将该值置为true，并进行本轮扩容的收尾工作
+    boolean finishing = false;
+
+    // i标识桶索引, bound标识边界
+  	// 初始情况，i=0，经过while，i=transferIndex-1，bound=transferIndex-stride
+    // 后续遍历，--i>=bound，遍历[transferIndex-stride, transferIndex-1]的桶，转移。每个桶拆分成高位低位两个桶，迁移完成后老桶设置为ForwardingNode节点。当--i<bound时，再经历一个周期（步长为stride），i=transferIndex-1，bound=transferIndex-stride
+    for (int i = 0, bound = 0; ; ) {
+        Node<K, V> f;
+        int fh;
+
+        // 每一次自旋前的预处理，主要是定位本轮处理的桶区间
+        // 正常情况下，预处理完成后：i == transferIndex-1，bound == transferIndex-stride
+        while (advance) {
+            int nextIndex, nextBound;
+          	// i递减关键
+            if (--i >= bound || finishing)
+                advance = false;
+            else if ((nextIndex = transferIndex) <= 0) {
+                i = -1;
+                advance = false;
+            } else if (U.compareAndSwapInt(this, TRANSFERINDEX, nextIndex,
+                nextBound = (nextIndex > stride ? nextIndex - stride : 0))) {
+              	// 更换下一周期
+                bound = nextBound;
+                i = nextIndex - 1;
+                advance = false;
+            }
+        }
+
+        if (i < 0 || i >= n || i + n >= nextn) {    // CASE1：当前是处理最后一个tranfer任务的线程或出现扩容冲突
+            int sc;
+            if (finishing) {    // 所有桶迁移均已完成
+                nextTable = null;
+                table = nextTab;
+              	// map阙值为1.5*n，n为原表长度
+                sizeCtl = (n << 1) - (n >>> 1);
+                return;
+            }
+
+            // 扩容线程数减1,表示当前线程已完成自己的transfer任务
+            if (U.compareAndSwapInt(this, SIZECTL, sc = sizeCtl, sc - 1)) {
+                // 判断当前线程是否是本轮扩容中的最后一个线程，如果不是，则直接退出
+                if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT)
+                    return;
+                finishing = advance = true;
+
+                /**
+                 * 最后一个数据迁移线程要重新检查一次旧table中的所有桶，看是否都被正确迁移到新table了：
+                 * ①正常情况下，重新检查时，旧table的所有桶都应该是ForwardingNode;
+                 * ②特殊情况下，比如扩容冲突(多个线程申请到了同一个transfer任务)，此时当前线程领取的任务会作废，那么最后检查时，
+                 * 还要处理因为作废而没有被迁移的桶，把它们正确迁移到新table中
+                 */
+                i = n; // recheck before commit
+            }
+        } else if ((f = tabAt(tab, i)) == null)     // CASE2：旧桶本身为null，不用迁移，直接尝试放一个ForwardingNode
+            advance = casTabAt(tab, i, null, fwd);
+        else if ((fh = f.hash) == MOVED)            // CASE3：该旧桶已经迁移完成，直接跳过
+            advance = true;
+        else {                                      // CASE4：该旧桶未迁移完成，进行数据迁移
+            synchronized (f) {
+                if (tabAt(tab, i) == f) {
+                    Node<K, V> ln, hn;
+                    if (fh >= 0) {                  // CASE4.1：桶的hash>0，说明是链表迁移
+
+                        /**
+                         * 下面的过程会将旧桶中的链表分成两部分：ln链和hn链
+                         * ln链会插入到新table的槽i中，hn链会插入到新table的槽i+n中
+                         */
+                        int runBit = fh & n;    // 由于n是2的幂次，所以runBit要么是0，要么高位是1
+                        Node<K, V> lastRun = f; // lastRun指向最后一个相邻runBit不同的结点
+                        for (Node<K, V> p = f.next; p != null; p = p.next) {
+                            int b = p.hash & n;
+                            if (b != runBit) {
+                                runBit = b;
+                                lastRun = p;
+                            }
+                        }
+                        if (runBit == 0) {
+                            ln = lastRun;
+                            hn = null;
+                        } else {
+                            hn = lastRun;
+                            ln = null;
+                        }
+
+                        // 以lastRun所指向的结点为分界，将链表拆成2个子链表ln、hn
+                        for (Node<K, V> p = f; p != lastRun; p = p.next) {
+                            int ph = p.hash;
+                            K pk = p.key;
+                            V pv = p.val;
+                            if ((ph & n) == 0)
+                                ln = new Node<K, V>(ph, pk, pv, ln);
+                            else
+                                hn = new Node<K, V>(ph, pk, pv, hn);
+                        }
+                        setTabAt(nextTab, i, ln);               // ln链表存入新桶的索引i位置
+                        setTabAt(nextTab, i + n, hn);        // hn链表存入新桶的索引i+n位置
+                        setTabAt(tab, i, fwd);                  // 设置ForwardingNode占位
+                        advance = true;                         // 表示当前旧桶的结点已迁移完毕
+                    }
+                    else if (f instanceof TreeBin) {    // CASE4.2：红黑树迁移
+
+                        /**
+                         * 下面的过程会先以链表方式遍历，复制所有结点，然后根据高低位组装成两个链表；
+                         * 然后看下是否需要进行红黑树转换，最后放到新table对应的桶中
+                         */
+                        TreeBin<K, V> t = (TreeBin<K, V>) f;
+                        TreeNode<K, V> lo = null, loTail = null;
+                        TreeNode<K, V> hi = null, hiTail = null;
+                        int lc = 0, hc = 0;
+                        for (Node<K, V> e = t.first; e != null; e = e.next) {
+                            int h = e.hash;
+                            TreeNode<K, V> p = new TreeNode<K, V>
+                                (h, e.key, e.val, null, null);
+                            if ((h & n) == 0) {
+                                if ((p.prev = loTail) == null)
+                                    lo = p;
+                                else
+                                    loTail.next = p;
+                                loTail = p;
+                                ++lc;
+                            } else {
+                                if ((p.prev = hiTail) == null)
+                                    hi = p;
+                                else
+                                    hiTail.next = p;
+                                hiTail = p;
+                                ++hc;
+                            }
+                        }
+
+                        // 判断是否需要进行 红黑树 <-> 链表 的转换
+                        ln = (lc <= UNTREEIFY_THRESHOLD) ? untreeify(lo) :
+                            (hc != 0) ? new TreeBin<K, V>(lo) : t;
+                        hn = (hc <= UNTREEIFY_THRESHOLD) ? untreeify(hi) :
+                            (lc != 0) ? new TreeBin<K, V>(hi) : t;
+                        setTabAt(nextTab, i, ln);
+                        setTabAt(nextTab, i + n, hn);
+                        setTabAt(tab, i, fwd);  // 设置ForwardingNode占位
+                        advance = true;         // 表示当前旧桶的结点已迁移完毕
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 前导零个数 | 1<<15
+static final int resizeStamp(int n) {
+        return Integer.numberOfLeadingZeros(n) | (1 << (RESIZE_STAMP_BITS - 1));
+    }
+
+// Integer
+// 求数字的补码前导零个数
+// 负数返回0
+public static int numberOfLeadingZeros(int i) {
+        // HD, Figure 5-6
+        if (i == 0)
+            return 32;
+        int n = 1;
+        if (i >>> 16 == 0) { n += 16; i <<= 16; }
+        if (i >>> 24 == 0) { n +=  8; i <<=  8; }
+        if (i >>> 28 == 0) { n +=  4; i <<=  4; }
+        if (i >>> 30 == 0) { n +=  2; i <<=  2; }
+  			// 减去符号位
+        n -= i >>> 31;
+        return n;
+    }
+```
+
+
 
 ### CopyOnWriteArrayList/CopyOnWriteArraySet
 

@@ -1,12 +1,14 @@
 ## Redis
 
 1. 数据结构
-   1. sds：扩容自动分配内存
+   1. sds：包含字段、自动扩容机制、字符串缩短不降低大小扩容
    2. 链表
    3. 字典：保存键值对。两个hash表以完成hash；渐进式hash；链地址法解决hash冲突（新节点在头部）
    4. 跳表：平均logN查询
-   5. 整数集合：升级，不能降级，添加元素O(N)
+      1. 节点属性：level，span，score，obj对象指针，后退指针
+   5. 整数集合：有序无重复，支持自动升级不能降级，添加元素O(N)
    6. 压缩列表：单节点属性（前一节点大小1或5字节，编码，数据）；连锁更新，平均复杂度O(N)
+      1. 节点属性：前一节点大小（1字节或5字节）、编码（保存字符类型和字符长度）、content（节点内容）
 2. 对象类型
    1. 字符串：int、embstr、raw
    2. 链表：ziplist、linkedList
@@ -312,12 +314,10 @@
 4. 过滤器和拦截器的区别：过滤器是servlet的，拦截所有资源，包括静态资源；拦截器是spring的，拦截所有请求，可以获取bean，基于反射实现
 5. start包自动加载：springboot启动类自带注解@SpringBootApplication，内包含注解@EnableAutoConfiguration，注解实现自动扫描所有jar包下META-INF/spring.factories文件，扫描文件中key为org.springframework.boot.autoconfigure.EnableAutoConfiguration的所有值，扫描所有AutoConfiguration类，把生效的bean载入到spring容器中
 
-<<<<<<< HEAD
 ## 设计模式
 
 1. 创建型、行为型、结构性
 2. 责任链
-=======
 ## 计算机网络
 
 1. Https加密过程
@@ -359,6 +359,86 @@
    5. 共享内存
    6. socket：用于不同机器上进程间通信
 
+## ElasticSearch
+
+1. 分布式全文搜索工具，提供restful接口，能处理PB级数据。采用倒排索引存储
+
+2. 全文检索流程
+
+   1. 创建索引：
+      1. 获得原始文档；
+      2. 根据文档创建Document
+      3. 文档分析，拆分出关键字：根据空格、标点拆分，大小写转换，取出标点，停用词剔除，分词器分割，去重
+      4. 创建索引：索引、文档、索引与文档对应关系
+   2. 索引检索：调用restful接口查询
+      1. match：查询全部
+      2. term：关键字查询，查询索引中是否存在关键之
+      3. query_string：短语查询，短语会按照分词器分成多个关键词查询，查询结果中score表示匹配程度
+      4. multi_match：在多个字段上同时查询短语
+      5. bool：多种逻辑组合查询，must，should，must_not，filter
+      6. 分词器
+         1. standard：es默认的标准分词器，中文直接一个一个字拆分，对中文支持的不好
+         2. IK：基于java开发的轻量级中文分词器，支持英文字符、数字、中文词汇（词语、姓名、地理位置等）拆分，支持用户字典扩展定义，但对中英结合支持的不好。分为ik_smart(只能拆分法，最少切分，比如`一个`直接拆分成一个)和ik_max_word（最细粒度拆分，`一个`拆分成一、个、一个）两种模式
+
+3. es与solar对比：es适用于实时搜索应用，仅支持json格式，自带分布式管理。solar适用于传统搜索应用，搜索已存在数据，实时建立索引时会造成io阻塞，通过zk管理
+
+4. 索引范围：index, (type), document, field
+
+   1. index不允许修改
+   2. type概念弱化，在es6中只允许创建一种type，在es7不允许创建，系统默认固定为_doc
+   3. 索引分片数量不允许修改
+
+5. restful接口：put-创建资源，post-更新资源，get-查询资源，delete-删除资源
+
+6. 工具
+
+   1. Head：es web界面工具，查询索引基本信息
+   2. kibana：es web界面工具，支持快速调用restful接口
+   3. logstash：日志收集工具
+   4. ELK：es+logstash+kibana
+
+7. 集群
+
+   1. 节点类型：master节点、数据节点、协调节点
+   2. 索引分片：主分片和副本片。集群状态绿黄红，红为集群下线
+   3. 集群选举
+      1. 选举时机，选举过程
+      2. 脑裂现象：通过控制大于集群一般节点才能进行选举
+
+8. 存储过程
+
+   1. 数据先保存在mermory buffer和translog缓存
+   2. mermory buffer每秒同步到file system cache中
+   3. file system cache每隔30分钟刷新到磁盘
+   4. translog在索引创建、删除、更新都刷新到磁盘中，类似mysql的redolog，保证数据不丢失
+
+9. 集群选择
+
+   1. 单机容量：一般内存64G，jvm内存32G，分片内存30G。分片内存最大建议不超过50G
+   2. 分片数量：单机3片效率较高
+
+## kafka
+
+1. 介绍：吞吐量特别高，适用于大数据收集、大数据分析，底层实现为scala，配合zk管理路由信息。因发送消息时先将消息保存在内存中，当内存消息达到一定数量再发送，索引kafka不太适用于一些实时应用
+2. 角色介绍
+   1. partition：每个topic都有多个分区
+   2. partition leader/follower：分区主备，实现高可用。注意时主备关系，备份机器不提供服务
+   3. segment：每个分区分成多个大小相等的segment
+   4. 代理：负责维护发布数据的系统，一个代理负责一个或多个分区，一个分区只能由一个代理负责
+   5. broker controller：负责管理集群partition和relicas的状态，partition leader由它选举出来。broker controller有zk选举
+   6. rebalance：当分区数量或消费者发送改变时进行rebalance，此时集群处于不可用状态
+   7. __consumer_offset：消费者消息完成提交offset保存在该主题中，该主题默认50个分区， consumer group消费的offse保存在指定分区，hash计算分区。kafka之前保存在zk中
+3. hw机制：表示消费者可消费的最大消息偏移量。保存消息时，当leader同步给所有的follower成功后才更新HW
+4. 消息发送的可靠机制：ack=0（单向发送，不管成功与否），ack=1（当partition leader落库成功即成功），ack=-1（当partition leader和所有follower保存成功即成功）
+5. partition选举范围：false-只能从ISR中选举，true-默认，可选择任意follower成为新leader
+6. 重复消息问题
+   1. 批量消息消费超时：增加消费超时时间，减小消费批次，手动提交消费偏移量
+   2. 不同consumer重复消费：消费者消息消费成功未提交就宕机，导致消费的消息偏移量丢失，这部分消息后续会再次消费
+7. 消息写入算法：从连接的broker中获取broker controller地址；获取partition leader地址，向leader发送消息；leader保存消息成功，将消息同步到ISR中的Follower中；follower全部同步成功，返回ack，更新HW；若等待follower的ack超时，则将其从follower移除，在更新HW
+8. 消息消费；获取broker controller地址；提交poll请求，请求分配partition leader，分配完之后按照对应partition拉取消息消费；消费成功后保存到__consumer_offset中
+9. .log和.index，日志文件和索引文件，记录一一对应
+
+
 ## 设计
 
 ### 1. 设计秒杀系统
@@ -369,11 +449,9 @@ https://zhuanlan.zhihu.com/p/41896183
 
 - 分流
 - 限流
-- 用户防刷机制
+- 用户防刷机制，分布式锁，部分直接秒杀失败
 - 缓存，本地缓存+分布式缓存（mysql、redis、zk）
 - 缓存预热，参与秒杀前需要先报名
-- 分布式锁
-- 部分直接秒杀失败
 
 热点隔离
 
@@ -383,9 +461,8 @@ https://zhuanlan.zhihu.com/p/41896183
 
 动静分离
 
-- 把整个页面缓存在浏览器中
-- 把90%的静态数据保存到CDN中。若强制刷新，会请求CDN
-- 实际有效按钮只有“刷新抢宝”按钮
+- 页面分为静态和动态数据，动态数据只有秒杀按钮。将静态页面及数据保存在浏览器中和CDN中
+- 动态数据实际有效按钮只有“刷新抢宝”按钮
 
 > CDN：网络加速器，可以使用户请求落到附近的缓存服务器，以快速返回，加快请求处理速率，减少网络阻塞
 
@@ -395,9 +472,7 @@ https://zhuanlan.zhihu.com/p/41896183
 
 数据分层校验
 
-- 先做数据动静分离
-- 将90%的数据缓存在客户端浏览器
-- 将动态请求的数据保存在web端
+- 先做数据动静分离。将静态数据保存在浏览器和CDN中
 - 对读数据不做强一致性校验
 - 对写数据基于时间分片（答题）
 - 对写请求进行限流保护
@@ -418,8 +493,42 @@ https://zhuanlan.zhihu.com/p/41896183
 - 对应用做排队，按照商品维度对设置队列顺序执行，较少对同一数据的并发修改，同时也能控制数据库连接数量
 - 数据库层做排队
 
+![](../image/p3188.png)
+
+总结
+
+- 业务隔离（提前报名），数据隔离，系统隔离
+- 多机分流，限流，用户防刷
+- 动静分离，静态数据保存在浏览器和CDN中
+- 动态数据读取redis读写分离（读多写少集群），不通过直接返回
+- 信息验证，确认订单，更新至redis主从版中，通过lua脚本保证多个操作的事务性
+- 保存成功后，异步保存到mysql中（rocketmq或redis list）
+
+```lua
+local n = tonumber(ARGV[1])
+if not n or n == 0 then
+	return 0
+end
+local val = redis.call("hmget", KEYS[1], "total", "selled");
+local total = tonumber(val[1]);
+local selled = tonumber(val[2]);
+if not total or not selled then
+	return -1
+end
+if selled + n <= total then
+	redis.call("hincrby", KEYS[1], "selled", n);
+	return n;
+end
+return -2;
+```
+
+### 2. 幂等设计
+
+#### 2.1 本地消息表
+
+![](../image/dedup-solution-02.png)
+
 ## 面试总结
 
 ### sql调优
 
->>>>>>> b1cb980d41e2628026e4c5ed512653d60b2a7712

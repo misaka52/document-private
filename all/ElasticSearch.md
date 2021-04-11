@@ -56,7 +56,7 @@
 
 ### 1. 流程概览
 
-主要分为量大流程：索引建立、搜索索引
+主要分为两大流程：索引建立、搜索索引
 
 索引建立：将所有的结构化和非结构化数据提炼，建立索引
 
@@ -292,6 +292,8 @@ kibana.index: ".kibana"
 - get：获取资源
 
 ### 1 创建index和mapping
+
+> hello为index
 
 ```json
 put hello
@@ -615,12 +617,12 @@ es对索引进行分片，每个分片分为主分片和副本分片
 
 ```properties
 # 最小候选节点数。
-# 该值应由quorum算法得出 value=master候选节点数量/2 (向下取整) + 1。表示至少存在超过半数master节点才允许选举
+# 该值应由quorum算法得出 value=master候选节点数量/2 (向下取整) + 1。表示至少存在超过半数master候选节点才允许选举
 discovery.zen.minimum_master_nodes:2
 # ping的超时时间
 discovery.zen.ping.timeout:10s
 # 当集群中没有master节点时，应该拒绝哪些操作（read, write）。有两种值: all和write
-discovery.zen.no_master_block : write
+discovery.zen.no_master_block: write
 ```
 
 **场景分析**
@@ -653,7 +655,7 @@ PUT /blogs/_settings
 }
 ```
 
-如下，分片副本数为2，当节点从2个扩展到三个时变化
+如下，分片副本数为2，当节点从2个扩展到3个时变化
 
 ![1635748-20190919153718631-60973](../image/1635748-20190919153718631-60973.png)
 
@@ -679,18 +681,18 @@ PUT /blogs/_settings
 
 #### 6.1 存储流程
 
-1. 当写请求发送到es时，数据线保存到memory buffer和translog中。
+1. 当写请求发送到es时，数据先保存到memory buffer和translog中。
 2. memory buffer默认每秒将数据刷新到file system cache中
 3. file system cache默认每30分钟刷新到磁盘中，同时清空translog
 4. translog默认每个index新增、删除、更新都刷新到磁盘中。每5s刷新到磁盘，当translog超过500MB时刷新磁盘
 
-放着file system cache异常断电丢失大量数据，通过translog来减少数据的丢失，每秒一次的fsync写入磁盘可能产生性能问题，可通过设置`index.translog.durability`和`index.translog.sync_interval`参数让translog每个一定时间进行一次fsync
+放着file system cache异常断电丢失大量数据，通过translog来减少数据的丢失，每秒一次的fsync写入磁盘可能产生性能问题，可通过设置`index.translog.durability`和`index.translog.sync_interval`参数让translog每隔一定时间进行一次fsync
 
 ![image-20210214182216118](../image/image-20210214182216118.png)
 
 #### 6.2 动态索引更新
 
-lucene对新收到的数据放入到新的索引文件中。lucene吧每次生成的倒排索引，称为一个端(segment)，然后使用commit文件记录索引段，生成段的数据来源就是内存中的buffer
+lucene对新收到的数据放入到新的索引文件中。lucene吧每次生成的倒排索引，称为一个段(segment)，然后使用commit文件记录索引段，生成段的数据来源就是内存中的buffer
 
 **准实时搜索**：生成新的段文件，等待刷新到磁盘中可能需要30分钟。此处查询可以直接通过file system cache去查询，延迟时间1s
 
@@ -891,7 +893,7 @@ sysctl -p
 | 28             | 4                | 211s     |
 | 56             | 7                | 214s     |
 
-ES6及之前默认分片数5，副本数1。ES7默认分片数1，副本数1
+ES6及之前默认分片数5，副本数1。ES7默认分片数1，副本数1。从上图分析，单节点3个分片效率最高
 
 #### 2.2 使用批量请求
 

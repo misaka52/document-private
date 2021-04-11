@@ -17,7 +17,7 @@
 
 ### 1.1 概述
 
-kafka一个消息系统，吞吐量特别高，专门用于收集大数据、分析大数据。底层实现主要为scala
+kafka是一个消息队列系统，吞吐量特别高，专门用于收集大数据、分析大数据。底层实现主要为scala
 
 apache kafka是一个分布式发布-订阅消息系统和一个强大的队列，可以处理大量数据，能够将消息从一端传递给另一端，保证消息零丢失，非常适合离线和在线消费。为保证数据不丢失，kafka消息保存在磁盘中。kafka基于zookeeper完成节点间消息同步
 
@@ -43,17 +43,13 @@ apache kafka是一个分布式发布-订阅消息系统和一个强大的队列�
 
 是kafka集群中的一个节点，即kafka主机。存档大量消息，消息保存在partition中
 
-- 代理，是负责维护发布数据的简单简单系统。若一个主题存在N个代理和N个分区，则每个代理一个分区
+- 代理，是负责维护发布数据的简单系统。若一个主题存在N个代理和N个分区，则每个代理一个分区
 - 若一个主题 存在的代理数大于分区数，则存在部分代理不负责分区；若代理数小于分区数，一个代理负责多个分区
 - 为了broker负载均衡平均，partition数量应为broker数量的整数倍
 
 **kafka cluster**
 
 当存在多个代理时称为kafka集群。可以扩展集群，无需停机
-
-**partition**
-
-分区，topic被分割为多个partition，用来保存消息
 
 **segment**
 
@@ -163,13 +159,13 @@ bin/kafka-topics.sh --zookeeper localhost:2181 --delete --topic topic_name
 
 > LEO 表示分区中消息的实际有效最大偏移量（leader宕机恢复后，会重置LEO）
 
-highWaterMark，高水位标记，表示consumer可消费的最大偏移量。当消息发送到partition后，消费不能立即消费这些消息，需要leader同步给其他follower完成，修改HW后才能被消费
+highWaterMark，高水位标记，表示consumer可消费的最大偏移量。当消息发送到partition后，需要leader同步给其他follower完成，修改HW后才能被消费
 
 HW为所有leader和follower的最小的偏移量（木桶效应），当消息保存到leader中后，leader同步给其他的follower，当所有分区的消费偏移量都增加了，才会增加HW
 
 **HW截断**
 
-当leader宕机了，选举一个follower称为新leader。新leader接收新消息，当原leader恢复后变为新leader的follower，复制数据。LEO重置，更新为老的HW，从新leader复制消息。这样可能造成老leader中 HW - LEO的数据丢失
+当leader宕机了，选举一个follower称为新leader。新leader接收新消息，当原leader恢复后变为新leader的follower，复制数据。LEO重置，更新为老的HW，从新leader复制消息。这样可能造成老leader中 HW - LEO的数据丢失，使用ack=-1模式可以避免这种情况
 
 ### 3.2 消息发送的可靠机制
 
@@ -242,6 +238,10 @@ consumer批量消费，当消费超时后，这批数据会重新消费导致重
 
 **4.2 kafka中segment的文件分为两类，.log和.index文件，这两种文件的关系**
 
+.index索引文件，.log日志文件，记录一一对应
+
+![image-20210411141120925](../image/image-20210411141120925.png)
+
 **4.3 怎么分配partition和broker的数量**
 
 **4.4 consumer与partition的对应关系**
@@ -252,9 +252,9 @@ consumer批量消费，当消费超时后，这批数据会重新消费导致重
 
 **4.6 rebalance**
 
-当消费者数量或分区数量发送变量，需要进行分区重新分配，该过程称为rebalance。
+当消费者数量或分区数量发送变化，需要进行分区重新分配，该过程称为rebalance。
 
-在均衡期间消费者无法读取消息，导致broker集群有一小段时间不可能，应尽量避免负载均衡
+在均衡期间消费者无法读取消息，导致broker集群有一小段时间不可用，应尽量避免负载均衡
 
 **4.7 消费者消息消费完成提交offset，该offset保存在哪里**
 
@@ -262,7 +262,7 @@ consumer批量消费，当消费超时后，这批数据会重新消费导致重
 
 **4.8 partition中的leader和follower是主从还是主备关系**
 
-主备关系，只要leader提供服务。
+主备关系，只有leader提供服务。
 
 **4.9 broker controller和partition leader由什么选举出来的**
 
