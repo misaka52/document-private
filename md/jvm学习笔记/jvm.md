@@ -719,20 +719,60 @@ javap -c Main.class 反编译
 
 双亲委派模型，所有的类加载都会交由自己的父加载器去加载，若加载失败才会尝试自己加载。启动类加载器是顶层类，是所有加载器的最终父类加载器。
 
-启动类加载器（bootstrap class loader）：虚拟机的一部分，C++实现。负责加载<JAVA_HOME>\lib目录的类，系统类。是扩展类加载器的父类加载器
+启动类加载器（bootstrap class loader）：虚拟机的一部分，bootstrapClassLoader，C++实现。负责加载<JAVA_HOME>\lib目录的类，系统类。是扩展类加载器的父类加载器
 
-扩展类加载器（Extension class loader）：java实现，独立于虚拟机。负责加载<JAVA_HOME>\lib\ext目录的类，系统类。是应用类加载器的父类加载器
+扩展类加载器（Extension class loader）：java实现，ExtClassLoader，独立于虚拟机。负责加载<JAVA_HOME>\lib\ext目录的类，系统类。是应用类加载器的父类加载器
 
-应用类加载器（Application class loader）：java实现，独立于虚拟机。加载用户路径上（classPath）的类库。是其他自定义类法父类加载器
+应用类加载器（Application class loader）：java实现，AppClassLoader，独立于虚拟机。加载用户路径上（classPath）的类库。是其他自定义类法父类加载器
 
 各类加载器之间的层次关系称为类加载器的“双亲委派模型”。加载器之间的父子关系一般不是以继承关系实现，通常使用组合关系来复用父加载器的代码
 
 破坏双亲委派模型样例
 
-- 例如JDCI、JDBC服务，一种父类加载器请求子类加载器完成加载
+- 在jdk1.2双亲委派模型出来之前
+- 使用线程上下文类加载器，实现父类加载器请求子类加载器完成类加载，例如JDCI、JDBC、JCE等服务
 - 对程序动态性的追求，热部署，通过自定义加载器加载，树形结构查找，破坏双亲委派模型
 
+##### 6.3.1 tomcat类加载机制
+
+https://blog.csdn.net/weixin_41835612/article/details/111401857
+
+tomcat是一个web容器，需要解决什么问题
+
+1. 一个web容器可能部署多个应用程序，不同应用程序可能依赖同一个第三方类库的不同版本，要求相互隔离。比如web应用存在一个同名的Servlet，各自实现不同，需要加载多分
+2. 部署在同一个web容器中相同的类库相同的版本可以共享，加载一次即可。比如Jar包中的同版本类
+3. Tomcat自身也是一个Java程序，需要隔离Tomcat本身的类和Web应用的类，避免相互影响，比如Web应用中定义了一个同名类导致Tomcat本身的类无法加载
+
+tomcat加载架构如下
+
+
+
+![](https://user-gold-cdn.xitu.io/2018/1/13/160ef5a013c24d04?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
+
+- WebAppClassLoader：web应用默认的类加载器，用来加载除基础类外的自定义类。当两个web容器的存在相同的一个Servert类时，两个web应用加载的类不一样。各个webapp私有的类加载器，加载路径上的class只对本webapp可见。路径WEB-INF/classes，/WEB-INF/lib/\*.jar
+- SharedClassLoader：用于web应用共享类加载，某些类库只需加载一次即可，其他web应用共享。各个webapp的共享类加载器，加载路径上的class对于tomcat不可见，对于所有webapp可见。路径/shared/*
+- CataLinaClassLoader：用于加载Tomcat本事的类，与其他应用类隔离。Tomcat容器私有的类加载器，加载路径上的class对于webapp不可见。路径/server/*
+- CommonLoader：作为CataLinaClassLoader和SharedClassLoader的父类加载器。Tomcat最基本的类加载器，加载路径上的class可被tomcat容器本身和各个webapp访问。路径/common/*
+
+tomcat类加载
+
+1. 首先在本地缓存中查询类是否被加载
+2. 从系统类加载器缓存中查询类是否被加载
+3. 尝试使用javase classLoader来加载类，这里javase classLoader具体实现是ExtClassLoader或bootStrapClassLoader，具体看jvm实现
+4. 若设置delegateLoad=true，则优先使用parent加载（sharedClassLoader/commonClassLoader）加载
+5. 在web应用目录中加载类，即自己加载
+6. 若delegateLoad=false，则尝试使用父类加载器加载
+7. 都加在失败，抛出异常
+
+tomcat默认未配置<loader delegate="true"/>，则delegate默认false
+
+其中5，6破坏了双亲委派模型，web应用优先采用自己的加载器加载，类加载机制实现了
+
+- 保证基础类不会被重复加载
+- 保证了同一个tomcat下不同web应用的class相互隔离
+
 ### 7 虚拟机字节码与执行引擎
+
 执行引擎是java虚拟机最核心的组成部分之一，执行java代码，解释执行和编译执行
 
 > Java方法在执行时都会创建一个栈帧，程序在编译的时候就确定了栈帧需要多大局部变量表、多深的操作数栈，分配的内存大小确定，不会在运行时改变
