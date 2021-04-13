@@ -1408,6 +1408,29 @@ Show heap histogram  查看对象占用内存信息，instance count：实例数
 >
 > [Ljava.lang.Double; 表示一维Double数组
 
+#### 2. 内存溢出和内存泄露
+
+1. 栈溢出。递归调用
+
+2. java堆内存溢出。不停地申请内存又不释放，导致对内存溢出
+
+3. 元空间内存溢出。循环动态创建class
+
+   1. 解决方案：-XX:MaxMetaspaceSize，元空间最大值，默认无上限
+   2. -XX:MetaspaceSize，触发元空间FGC的阈值，默认21M
+   3. -XX:MinMetaspaceFreeRatio：gc之后元空间的剩余的最小容量
+   4. -XX:MaxMetaspaceFreeRatio：gc之后元空间剩余的最大容量
+
+4. 直接内存溢出，申请过多的直接内存导致溢出。可以通过增加-XX:MaxDirectMemorySize参数或及时清理内存来避免
+
+   ![](../../image/1984028405-5c03d0cb542a5_fix732.png)
+
+5. 创建本地线程内存溢出。不停的创建本地线程，比如CachedThreadPool
+
+6. 超出交换区内存溢出，当jvm所请求的总内存大于机器物理内存时，操作系统将内容从内存转化为硬盘，一般会抛出out of swap space错误
+
+7. 数组超限内存溢出。数组申请过大导致内存超限，Requested array size exceeds VM limit，不同平台限制不同
+
 ### 附录
 
 #### 相关指令
@@ -1422,7 +1445,6 @@ Show heap histogram  查看对象占用内存信息，instance count：实例数
     - := 表示参数被系统或用户赋值了
   - java -XX:+PrintCommandLineFlags 显示jvm初始化完毕的所有和初始默认值不同的参数，即:= 的参数
 
-  
 
 ### 参考
 1. 深入理解java虚拟机 第三版
