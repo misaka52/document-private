@@ -92,3 +92,8 @@
 2. 寻找两个排序数据中，第k大的数，两个数组间无顺序。参考：https://blog.csdn.net/qiki_tangmingwei/article/details/80957855
 
 3. 对于一个字符串，计算其中[最长回文子串](https://www.nowcoder.com/jump/super-jump/word?word=最长回文子串)的长度
+
+4. 给定一个长度为N的整形数组arr，其中有N个互不相等的自然数1-N，请实现arr的[排序](https://www.nowcoder.com/jump/super-jump/word?word=排序)，但是不要把下标0∼N−1位置上的数通过直接赋值的方式替换成1∼N
+
+5. 给定一个[二叉树](https://www.nowcoder.com/jump/super-jump/word?word=二叉树)，请计算节点值之和最大的路径的节点值之和是多少，这个路径的开始节点和结束节点可以是[二叉树](https://www.nowcoder.com/jump/super-jump/word?word=二叉树)中的任意节点
+
