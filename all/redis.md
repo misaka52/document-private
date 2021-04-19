@@ -1174,6 +1174,93 @@ try {
 
 具体实现细节：https://mp.weixin.qq.com/s/8uhYult2h_YUHT7q7YCKYQ
 
+### 13. Springboot中使用lua脚本
+
+注意
+
+lua脚本
+
+```lua
+local limit = tonumber(ARGV[1]);
+local expire = tonumber(ARGV[2]);
+local key = KEYS[1];
+local current = tonumber(redis.call("get", key) or 0);
+if current + 1 > limit then
+    return 0;
+else
+    local res = redis.call("incrby", key, "1");
+    if res == 1 then
+		redis.call("expire", key, expire);
+	end
+	return 1;
+end
+```
+
+程序
+
+```java
+DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setScriptSource(new ResourceScriptSource(new ClassPathResource("lua/limit.lua")));
+        script.setResultType(Long.class);
+        Long res = redisTemplate.execute(script, Collections.singletonList("cur"), "10", "100");
+        return String.valueOf(res);
+```
+
+注意：返回值类型不能用Integer类型，只支持List、Boolean、Long
+
+```java
+public enum ReturnType {
+
+	/**
+	 * Returned as Boolean
+	 */
+	BOOLEAN,
+
+	/**
+	 * Returned as {@link Long}
+	 */
+	INTEGER,
+
+	/**
+	 * Returned as {@link List<Object>}
+	 */
+	MULTI,
+
+	/**
+	 * Returned as {@literal byte[]}
+	 */
+	STATUS,
+
+	/**
+	 * Returned as {@literal byte[]}
+	 */
+	VALUE;
+
+	/**
+	 * @param javaType can be {@literal null} which translates to {@link ReturnType#STATUS}.
+	 * @return never {@literal null}.
+	 */
+	public static ReturnType fromJavaType(@Nullable Class<?> javaType) {
+
+		if (javaType == null) {
+			return ReturnType.STATUS;
+		}
+		if (javaType.isAssignableFrom(List.class)) {
+			return ReturnType.MULTI;
+		}
+		if (javaType.isAssignableFrom(Boolean.class)) {
+			return ReturnType.BOOLEAN;
+		}
+		if (javaType.isAssignableFrom(Long.class)) {
+			return ReturnType.INTEGER;
+		}
+		return ReturnType.VALUE;
+	}
+}
+```
+
+
+
 ## 四、面试题
 
 1. redis有哪些结构？哪几种对象

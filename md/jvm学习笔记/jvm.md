@@ -66,7 +66,9 @@ https://gu_chun_bo.gitee.io/java-construct/#/jvm%E5%AD%A6%E4%B9%A0/jvm-%E5%86%85
 >
 > -XX:+UseCompressedOops 开启指针压缩
 
-**实例数据**
+**实例数据**：包括内部变量，数组变量（只保存记录对象的指针大小），对象（只保存记录对象的指针大小）
+
+> 对象指针大小由上述类型指针控制
 
 **对齐填充**：非必然存在，当对象的总内容不足八字节的补齐，因hosSop虚拟机的对象内存管理系统要求对象起始地址必须是8字节的整倍数
 
@@ -1189,6 +1191,314 @@ SourceFile: "Main.java"
 
 方法级的sychronized加锁，没有monitor两个字节码指令。jvm可以从常量池的方法表结构中的ACC_SYNCHRONIZED访问标识来识别是否为同步方法，若为同步方法则需要获取monitor，才能支持该方法，否则阻塞等待
 
+###### 10.2.3.4 流程图
+
+![img](https://user-gold-cdn.xitu.io/2018/9/6/165adaeab7580a64?imageslim)
+
+**偏向锁**
+
+1. 判断是否处于无锁状态，不是则添加轻量级锁或重量级锁
+2. 若是则判断偏向状态
+   1. 当为非偏向状态，进入3
+   2. 当为偏向状态，判断当偏向线程id为若当前线程id时，则更新锁标记位为01，偏向状态1，然后直接进入同步块；否则进入3
+   3. CAS替换Mark word线程id，成功则表示偏向成功，进入同步块；失败则表示存在锁竞争，准备撤销偏向锁
+   4. 当偏向锁线程运行至安全点时（引用关系无变化时）才能撤销偏向锁，暂停原持有偏向锁的线程，判断偏向线程若为活跃状态或已退出同步代码块则状态改为无锁标识，然后唤醒原持有偏向锁的线程继续竞争偏向锁；否则准备升级为轻量级锁，先将Mark word保存到原持有偏向锁的线程中（开辟Lock Record），然后更新锁标记为为00轻量级锁
+
+**轻量级锁**
+
+1. 原持有偏向锁线程获取轻量级锁，唤醒该线程，从安全点继续执行，释放锁
+2. 当前争夺锁的线程，在线程中开辟Lock Record空间，将对象Mark word内容拷贝到该空间，并将Mark word指针指向Lock Record的指针。然后通过CAS替换Mark word指针，成功则获取锁；失败则自旋重试获取锁，当失败次数超过指定次数时，则将锁升级为重量级锁
+
+**重量级锁**
+
+1. 更新锁标识位为10，Mark word指针指向monitor
+
+无锁>偏向锁：当仅有一个线程进入同步块时，通过CAS替换偏向线程，对象锁状态设置为01，偏向模式1。后续该线程再进入同步块不需要再进行cas
+
+偏向锁>轻量级锁：当一线程获取了偏向锁，另一线程竞争该锁，则首先判断原偏向锁线程存活状态，若处于非活跃状态则将对象设置为无锁状态，重新偏向；若线程活跃，则检查该线程是否需要继续持有锁，若不需要则释放重新偏向，否则偏向锁升级为轻量级锁
+
+轻量级锁>重量级锁：当轻量级锁发生大量竞争时，且自旋失败超过一定次数，锁升级为重量级锁
+
+偏向锁、轻量级锁不涉及monitor获取，仅通过替换对象Mark Work实现，monitor本质上通过操作系统底层mutex lock实现，操作系统实现线程间的切换需要从用户态到内核态的切换，切换成本高。monitorenter指令有优化，当为非重量级锁时使用偏向锁或轻量级锁
+
+https://www.jianshu.com/p/22b5a0a78a9b
+
+每个线程都包含多个Lock Record区域，每个锁对象一个。Lock Record区域中包含两部分：_displaced_header：保存对象Mark Word的空间；\_obj：指向锁对象指针，用来判断线程是否持有锁，当线程释放锁时会\_obj会置空
+
+> 偏向锁和重量级锁只会使用到Lock Record的_obj指针，当线程退出同步块时会置空\_obj指针，但不会置空Mark Word线程id
+>
+> 轻量级锁会用到Lock Record的_displaced_header和\_obj指针
+
+偏向锁获取
+
+- 对象初始化状态为匿名偏向锁（偏向状态+锁标记为101，线程id为0），线程T1直接CAS获取偏向锁，设置Mark Word对象线程id
+- 线程T1再次进入同步块，判断锁对象为偏向锁且线程id相同（异或结果为0则相同），重入次数加一，退出后重入次数减一
+- 线程T2竞争锁对象，CAS替换Mark Word失败（cas比较，原-0，新-T2线程id），尝试锁撤销
+- 若线程为批量重偏向流程，则CAS重偏向为当前线程，成功则获取偏向锁成功；失败则升级轻量级锁
+- 若线程为批量撤销流程，直击升级为轻量级锁
+
+![](../../image/19073098-c7767234fccb87e0.webp)
+
+锁撤销
+
+- 安全点撤销撤下如下
+- 非安全点撤销
+  - 若为匿名偏向锁，CAS修改为无锁状态，成功则升级为轻量级锁，失败再进入单个**撤销动作**
+  - 若发生了批量重定向，判断是否支持重定向，若支持则CAS重偏向为当前线程（成功在升级为轻量级锁，失败在进一步撤销）。若不支持重定向（CAS修改为无锁状态，成功再升级为轻量级锁，失败再进一步撤销）
+  - 若发生了批量撤销，都升级为轻量级锁
+
+![](../../image/19073098-991e7705845df1a8.webp)
+
+进一步撤销
+
+- 若锁撤销次数未达到批量重偏向/批量撤销阈值，判断当前线程是否发生批量重偏向，是则**直接撤销**，否则在安全点撤销
+- 当锁撤销次数达到了批量重偏向阈值（默认20），则在安全点进行批量重偏向
+- 当锁撤销次数达到了批量撤销阈值（默认40），则在安全点进行批量撤销
+
+> Klass可以理解类的属性，保存该类的Mark Word信息
+>
+> 当某个类的对象撤销次数超过批量重偏向阈值，会触发批量重偏向逻辑，修改Klass中的epoch值，并修改当前锁对象Mark Word的epoch值。当线程想要获取偏向锁时，对比当前Mark Word和epoch是否相等，若不相等则表示过期，无需撤销锁，直接进行CAS修改Mark Word偏向当前线程。然后更新所有存活的的线程，找到该类对应正在使用偏向锁对象，将其epoch更新
+>
+> 当某个类的对象撤销次数超过批量撤销阈值，会触发批量撤销逻辑。修改Klass中的eopch，更改为不支持偏向锁，后续线程获取锁时直接不允许偏向。对于新建对象，直接变为无锁模式；然后处理该类正在被使用的锁对象，撤销其偏向锁
+>
+> 批量撤销实验：当模拟多次撤销（对于同一对象，线程A同步加锁，运行完成后线程B同步加锁，这样造成一次偏向锁撤销，或者A未运行完就执行B也会引起一次锁撤销）超过40次，新对象变为无锁模式
+>
+> 批量重偏向实验：每撤销20次偏向锁，其最后一次触发批量重偏向，直接获取偏向锁而非轻量级锁。然后隔一段时间后重新计数，才能再次触发批量重偏向
+>
+> -XX:BiasedLockingBulkRevokeThreshold=40 批量撤销阈值
+> -XX:BiasedLockingBulkRebiasThreshold=20  批量重偏向阈值
+> -XX:BiasedLockingDecayTime=0  触发一次批量重偏向之后间隔多长时间开启新重偏向计数，单位毫秒
+
+![](../../image/19073098-4743b40e69549ed6.webp)
+
+(安全点)锁撤销
+
+- 判断占用锁的线程是否存活
+  - 若是，则判断线程是否还在占有锁（判断Lock Record中指针是否为空），若是则升级为轻量级锁，否则判断是否支持偏向，如下
+  - 若否，则判断是否支持偏向（默认false，只有在触发释放次数达20次触发批量重定向才为true）
+    - 如支持则修改为匿名偏向锁
+    - 若不支持则修改为无锁
+
+![](../../image/19073098-a77cd39d35438ee3.webp)
+
+三者共同点
+
+- 三者都用到了Lock Record记录，偏向锁和重量级锁只用到了其中_obj指正，轻量级锁都用到了
+- 释放锁时都需要修改Lock Record中的_obj记录为空
+
+三者不同点
+
+- 偏向锁和轻量级锁锁定的是对象的Mark Word，重量级锁锁定的是ObjectMonitor
+- 偏向锁和轻量级锁通过Lock Record个数来录入重入个数，重量级锁通过_recursion记录重入个数
+- 偏向锁和轻量级锁的重入只需要做简单的判断，重量级锁需要CAS更新重入个数
+
+###### 10.2.3.5 源码实现
+
+https://www.nowcoder.com/discuss/604631?source_id=profile_create_nctrack&channel=-1
+
+```
+-XX:+UseBiasedLocking，偏向锁在java6默认开启，通过该参数配置开关
+-XX:BiasedLockingStartupDelay=4000，配置jvm启动多长时间开启偏向锁，默认4000，单位毫秒
+```
+
+![](https://uploadfiles.nowcoder.com/files/20210303/762908001_1614776280981/c6648dc951e4712bb00ab15b3a5d42f7.png)
+
+**\_cxq和\_entryList两个队列区别**
+
+\_cxq是单向链表，保存阻塞任务。\_entryList时双向列表，保存阻塞任务，同时唤醒队列任务，减少并发竞争
+
+**自旋**
+
+重量级锁才自旋，轻量级锁无自旋。在升级为重量锁之后，首先尝试自旋获取锁，仅当自旋失败超过指定次数才获取monitor，线程挂起。
+
+**epoch**
+
+![](https://uploadfiles.nowcoder.com/files/20210303/762908001_1614776281181/85f73c9401adab5f65d0ad26a00c49da.png)
+
+epoch：表示偏向锁的版本
+
+当**一个类对象**偏向锁撤销次数过多，超过阈值（XX:BiasedLockingBulkRebiasThreshold，默认为 20），则把当代的偏向锁废弃，epoch加一。为保证撤销时不能丢失，需要在线程在安全点是才能撤销偏向锁
+
+当**类**的偏向锁撤销次数超过阈值(XX:BiasedLockingBulkRevokeThreshold，默认值为 40)，则取消该类的偏向锁功能
+
+**hashCode**
+
+无锁状态时前一部分保存hashcode，当对象计算过一致性哈希码时，将hashcode保存至无锁状态下的hashcode中，并且计算过hashcode的线程不能获取偏向锁。
+
+当锁处于偏向锁状态时，若收到计算hashcode的请求，直接升级为重量级锁，将对象hashcode保存到monitor对象中
+
+当对象处于无锁状态，且计算过hashcode，加锁时直接添加轻量级锁，将Mark Word拷贝到线程Lock Record中
+
+> 这里hashcode不是用户自定义的hashCode，而是Ojbect::hashCode或java.lang.System.identityHashCode(Object)返回的值
+>
+> 偏向锁状态下计算hashcode为什么直接升级为重量级锁，而不是轻量级锁？因为线程id已经占领hashcode的位置，无法保存新的hashCode。猜测此处应该不允许本地变量临时保存hashcode
+
+**偏向锁撤销**
+
+当发生锁竞争失败时，需要撤销偏向锁。在安全点处暂停原持有偏向锁线程，判断线程是否活跃且是否未退出同步块，若是，则升级为轻量级锁；否则偏向锁替换为新线程。上述判断是否活跃或退出同步块，通过jvm某配置设置为true才需要判断，默认为false，所以偏向锁一旦发生竞争直接升级为重量级锁，不管原线程活跃结束与否
+
+###### 10.2.3.6 Mark Word实验
+
+https://www.cnblogs.com/LemonFive/p/11246086.html
+
+**引入jar包**
+
+```xml
+<dependency>
+  <groupId>org.openjdk.jol</groupId>
+  <artifactId>jol-core</artifactId>
+  <version>0.8</version>
+</dependency>
+```
+
+**打印对象Mark Word**：System.out.println(ClassLayout.parseInstance(o).toPrintable());
+
+```
+com.ysc.springboot.jvm.SyncTest$A object internals:
+ OFFSET  SIZE      TYPE DESCRIPTION                               VALUE
+      0     4           (object header)                           01 00 00 00 (00000001 00000000 00000000 00000000) (1)
+      4     4           (object header)                           00 00 00 00 (00000000 00000000 00000000 00000000) (0)
+      8     4           (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     1   boolean A.flag                                    false
+     13     3           (loss due to the next object alignment)
+Instance size: 16 bytes
+Space losses: 0 bytes internal + 3 bytes external = 3 bytes total
+```
+
+第一行(0,4)：表示Mark Word，前八位分别为
+
+```
+未使用unused-1bit  分代年龄age-4bit  偏向标记biased_lcok-1bit  锁标志位lock-2bit
+```
+
+第二行(4,4)：表示对象引用
+
+第三行(8,4)：表示压缩指针
+
+第四行(12,1)：表示对象内变量flag
+
+第五行(13,3)：补齐内存，抱枕对象大小为8字节整数倍
+
+```java
+package com.ysc.springboot.jvm;
+
+import org.openjdk.jol.info.ClassLayout;
+
+public class SyncTest {
+    public static void main(String[] args) throws Exception {
+//        noLock();
+//        biaseInit();
+//        biaseInit();
+//        biase();
+//        myHashCode();
+//        myHashCode2();
+        lightWeight();
+//        heightWeight();
+    }
+    // 当发送锁竞争时，直接变更为重量级锁
+    static void heightWeight() throws InterruptedException {
+        A a = new A();
+        Thread thread1 = new Thread(() -> {
+            synchronized (a) {
+                markWord(a);
+            }
+        });
+        Thread thread2 = new Thread(() -> {
+            synchronized (a) {
+                markWord(a);
+            }
+        });
+        thread1.start();
+        thread2.start();
+        // 等待所有线程执行完毕
+        Thread.sleep(2000);
+        // 重量级锁释放后变为无锁状态，其他字段均为0
+        markWord(a);
+    }
+
+    // 偏向锁升级为轻量级锁，一旦发生锁竞争直接锁膨胀
+    static void lightWeight() throws InterruptedException {
+        A a = new A();
+        new Thread(() -> {
+            synchronized (a) {
+                markWord(a);
+            }
+            System.out.println("lock released");
+        }).start();
+
+        Thread.sleep(2000);
+        synchronized (a) {
+            markWord(a);
+        }
+        Thread.sleep(1000);
+        // 偏向锁释放后变为无锁，其他字段均为0
+        markWord(a);
+
+        Thread.sleep(2000);
+        synchronized (a) {
+            markWord(a);
+        }
+    }
+
+    // 处于偏向锁状态下，计算hashcode，直接升级为重量级锁
+    static void myHashCode2() {
+        A a = new A();
+        synchronized (a) {
+            markWord(a);
+            a.hashCode();
+            markWord(a);
+        }
+    }
+
+    // 计算hashcode之后直接加锁，直接添加轻量级锁
+    // 若hashcode重写了，重写后的hashcode不存在在Mark Word中，对加锁无影响
+    static void myHashCode() {
+        A a = new A();
+        a.hashCode();
+        markWord(a);
+        synchronized (a) {
+            markWord(a);
+        }
+    }
+
+    static void biase() throws InterruptedException {
+        A a = new A();
+        synchronized (a) {
+            markWord(a);
+        }
+        Thread.sleep(2000);
+        markWord(a);
+    }
+
+    // 偏向锁默认在jvm启动后4s开启，通过参数设置：-XX:BiasedLockingStartupDelay=0
+    // 偏向锁，特殊的无锁状态，thread id和epoch均为0
+    static void biaseInit() throws InterruptedException {
+//        Thread.sleep(5000);
+        Object o = new Object();
+      	markWord(o);
+    }
+
+    // 无锁
+    static void noLock () {
+        Object o = new Object();
+        markWord(o);
+    }
+
+    static class A {
+        boolean flag;
+//        @Override
+//        public int hashCode() {
+//            return flag ? 1 : 0;
+//        }
+    }
+
+    static void markWord(Object o) {
+        System.out.println(ClassLayout.parseInstance(o).toPrintable());
+    }
+}
+
+```
+
 #### 10.3 锁优化
 
 ##### 10.3.1 自旋锁和自适应自旋
@@ -1228,11 +1538,11 @@ jdk6引入，在没有多线程的竞争下，减少重量级锁使用操作系�
    1. 若修改成功，则锁对象标记为00，线程t持有锁，拷贝Mark Word至Lock Record中
    2. 若修改失败，检查锁对象Mark Word中是否指向线程栈帧
       1. 若指向，直接进入同步块
-      2. 若不指向，循环多次尝试，则表示存在竞争，循环多次尝试获取，若失败超过一定次数：则锁膨胀为10重量级锁，Mark Word指向monitor指针，线程t进入阻塞状态
+      2. 若不指向，则表示存在竞争，循环多次尝试获取，若失败超过一定次数：则锁膨胀为10重量级锁，Mark Word指向monitor指针，线程t进入阻塞状态
 
 ###### 10.3.4.2 解锁
 
-当线程t离开同步块时，尝试CAS进行替换解锁，若Mark Word中仍指向线程t的栈帧Lock Record，则替换成功，成功解锁；若替换失败，表示索已经升级为重量级锁，则释放monitor，唤醒其他阻塞线程
+当线程t离开同步块时，尝试CAS进行替换解锁，若Mark Word中仍指向线程t的栈帧Lock Record，则替换成功，成功解锁；若替换失败，表示锁已经升级为重量级锁，则释放monitor，唤醒其他阻塞线程
 
 ##### 10.3.5 偏向锁
 
@@ -1240,25 +1550,11 @@ jdk6引入的锁优化措施，目的是为了消除在无竞争情况下的同�
 
 当其他线程尝试竞争偏向锁时，先检查原偏向锁线程存活情况，若线程处于不活动状态，则设置成无锁状态，可以重新偏向；若处于活动状态，则检查该线程是否仍需要持有偏向锁，若不需要则重新偏向，若仍然需要则将偏向锁升级为轻量级锁
 
-对象头Mark Word前一部分记录对象哈希码，线程ID或锁的指针。当对象锁定时，Mark Word前一部分保存锁指针，对象哈希码如何存储？java中对象在计算过哈希码之后，该值就是不变的，一般都是通过Object::hashCode()获取，返回的是对象的一致性哈希码。当对象计算过一致性哈希码后，则表示无法再进度偏向锁状态。Monitor中保存了非加锁状态的mark word，即保存了hashcode。
+对象头Mark Word前一部分记录对象哈希码，线程ID或锁的指针。当对象锁定时，Mark Word前一部分保存锁指针，对象哈希码如何存储？java中对象在计算过哈希码之后，该值就是不变的，一般都是通过Object::hashCode()获取，返回的是对象的一致性哈希码。当对象计算过一致性哈希码后，则表示无法再进度偏向锁状态，当一个对象处于偏向状态时，收到计算一致性哈希码请求则立即升级为重量级锁，以保存，重量级锁的ObjectMonitor保存了非加锁状态的hashcode
 
 > 这里hashcode不是用户自定义的hashCode，而是Ojbect::hashCode或java.lang.System.identityHashCode(Object)返回的值
 
 偏向锁属于无锁状态，轻量级锁为乐观锁，重量级锁为悲观锁
-
-##### 10.3.6 锁膨胀
-
-![](https://user-gold-cdn.xitu.io/2018/9/6/165adaeab7580a64?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
-
-无锁>偏向锁>轻量级锁>重量级锁
-
-无锁>偏向锁：当仅有一个线程进入同步块时，通过CAS替换偏向线程，对象锁状态设置为01，偏向模式1。后续该线程再进入同步块不需要再进行cas
-
-偏向锁>轻量级锁：当一线程获取了偏向锁，另一线程竞争该锁，则首先判断原偏向锁线程存活状态，若处于非活跃状态则将对象设置为无锁状态，重新偏向；若线程活跃，则检查该线程是否需要继续持有锁，若不需要则释放重新偏向，否则偏向锁升级为轻量级锁
-
-轻量级锁>重量级锁：当轻量级锁发生大量竞争时，且自旋失败超过一定次数，锁升级为重量级锁
-
-偏向锁、轻量级锁不涉及monitor获取，仅通过替换对象Mark Work实现，monitor本质上通过操作系统底层mutex lock实现，操作系统实现线程间的切换需要从用户态到内核态的切换，切换成本高
 
 ### 调优
 
