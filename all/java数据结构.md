@@ -1449,6 +1449,12 @@ AQS作用为：管理同步状态、阻塞和唤醒线程、管理等待队列
 
 AQS采用int类型的state来保存同步状态，并暴露getState、setState和compareAndSetState来读取和更新状态
 
+ReentrantLock-state：等于0表示无锁状态；大于0表示锁重入数量
+
+CountDownLatch-state：大于0表示资源数，调用countDown减一；等于0时表示无锁状态，唤醒await阻塞的线程
+
+ReentrantReadWriteLock-state：前16位表示读锁重入数，后16位表示写锁重入数
+
 ##### 1.2 线程的唤醒/阻塞
 
 通过LockSupport来完成线程的唤醒和阻塞
@@ -1627,7 +1633,7 @@ protected final boolean tryRelease(int releases) {
             setState(c);
             return free;
         }
-//// signal 取出条件队列中的首节点，加入等待队列。状态有阻塞态变为就绪态
+//// signal 取出条件队列中的首节点，加入等待队列。状态由阻塞态变为就绪态
 public final void signal() {
   					// 判断是否持有锁
             if (!isHeldExclusively())
@@ -2070,9 +2076,229 @@ private boolean doAcquireNanos(int arg, long nanosTimeout)
 - 读锁：读锁之间不互斥
 - 写锁：与读锁、写锁互斥
 
-**锁降级**：支持锁降级，对于同一线程，先获取写锁，再获取读锁，然后释放写锁，相当于写锁降级成了读锁。这样不能锁升级
-
 **Condition条件支持**：读锁调用newCondition()会抛出UnsupportedOperationException()，写锁可以获取condition。因为线程对读锁的访问不受限制，无法锁住对象，所以不支持condition
+
+写锁可降级为读锁，不可升级
+
+- state字段，前16位表示读锁数量，后16位表示写锁数量
+
+- 当等待队列表头为互斥节点时，表示当前读锁被占用；当等待表头为共享节点时，表示当前写锁被占用，当写锁释放时，会以传播形式唤醒共享节点
+- HoldCounter、ThreadLocalHoldCounter：仅保存线程读锁的重入量
+
+```java
+// threadLocal变量，保存每个线程的读锁重入量
+private transient ThreadLocalHoldCounter readHolds;
+// 缓存HoldCounter，表示当前活跃的重入线程
+private transient HoldCounter cachedHoldCounter; 
+static final class HoldCounter {
+            int count = 0;
+            // Use id, not reference, to avoid garbage retention
+            final long tid = getThreadId(Thread.currentThread());
+        }
+ static final class ThreadLocalHoldCounter
+            extends ThreadLocal<HoldCounter> {
+            public HoldCounter initialValue() {
+                return new HoldCounter();
+            }
+        }
+```
+
+#### ReadLock
+
+若当前不存在写锁，修改state状态，记录重入次数，加锁成功；若存在写锁，将当前线程封装为共享节点添加条件队列中，等待后续缓存
+
+```java
+// AQS
+public final void acquireShared(int arg) {
+  			// 当获取共享资源返回负数（存在写锁），则阻塞当前节点
+        if (tryAcquireShared(arg) < 0)
+            doAcquireShared(arg);
+    }
+// RRW
+protected final int tryAcquireShared(int unused) {
+            Thread current = Thread.currentThread();
+            int c = getState();
+  					// 检验写锁是否被占用
+            if (exclusiveCount(c) != 0 &&
+                getExclusiveOwnerThread() != current)
+                return -1;
+  					// 获取读锁当前重入数
+            int r = sharedCount(c);
+  					// 判断阶段是否需要等待（当等待队列头结点不为共享节点时需要等待）
+            if (!readerShouldBlock() &&
+                r < MAX_COUNT &&
+                // 读操作次数加一
+                compareAndSetState(c, c + SHARED_UNIT)) {
+                if (r == 0) {
+                    firstReader = current;
+                    firstReaderHoldCount = 1;
+                } else if (firstReader == current) {
+                    firstReaderHoldCount++;
+                } else {
+                    HoldCounter rh = cachedHoldCounter;
+                    if (rh == null || rh.tid != getThreadId(current))
+                        cachedHoldCounter = rh = readHolds.get();
+                    else if (rh.count == 0)
+                        readHolds.set(rh);
+                    rh.count++;
+                }
+                return 1;
+            }
+            return fullTryAcquireShared(current);
+        }
+static final class NonfairSync extends Sync {
+        private static final long serialVersionUID = -8159625535654395037L;
+  			// 非公平锁写锁不阻塞
+        final boolean writerShouldBlock() {
+            return false; // writers can always barge
+        }
+  			// 非公平锁读锁，仅当等待队列不为空且首节点不为共享节点，且节点对应线程非空。即存在写请求等待时，读请求应该阻塞
+        final boolean readerShouldBlock() {
+            /* As a heuristic to avoid indefinite writer starvation,
+             * block if the thread that momentarily appears to be head
+             * of queue, if one exists, is a waiting writer.  This is
+             * only a probabilistic effect since a new reader will not
+             * block if there is a waiting writer behind other enabled
+             * readers that have not yet drained from the queue.
+             */
+            return apparentlyFirstQueuedIsExclusive();
+        }
+    }
+final boolean apparentlyFirstQueuedIsExclusive() {
+        Node h, s;
+        return (h = head) != null &&
+            (s = h.next)  != null &&
+            !s.isShared()         &&
+            s.thread != null;
+    }
+                compareAndSetState(c, c + SHARED_UNIT)) {
+// 自旋修改State值
+final int fullTryAcquireShared(Thread current) {
+            /*
+             * This code is in part redundant with that in
+             * tryAcquireShared but is simpler overall by not
+             * complicating tryAcquireShared with interactions between
+             * retries and lazily reading hold counts.
+             */
+            HoldCounter rh = null;
+            for (;;) {
+                int c = getState();
+                if (exclusiveCount(c) != 0) {
+                    if (getExclusiveOwnerThread() != current)
+                        return -1;
+                    // else we hold the exclusive lock; blocking here
+                    // would cause deadlock.
+                } else if (readerShouldBlock()) {
+                  	// 当等待队列存在写锁获取请求时，仅接受获取了读锁的线程重入。对于新线程或重入数量为0的线程读请求，直接返回-1，加锁失败
+                    // Make sure we're not acquiring read lock reentrantly
+                    if (firstReader == current) {
+                        // assert firstReaderHoldCount > 0;
+                    } else {
+                        if (rh == null) {
+                            rh = cachedHoldCounter;
+                            if (rh == null || rh.tid != getThreadId(current)) {
+                                rh = readHolds.get();
+                                if (rh.count == 0)
+                                    readHolds.remove();
+                            }
+                        }
+                        if (rh.count == 0)
+                            return -1;
+                    }
+                }
+                if (sharedCount(c) == MAX_COUNT)
+                    throw new Error("Maximum lock count exceeded");
+                if (compareAndSetState(c, c + SHARED_UNIT)) {
+                    if (sharedCount(c) == 0) {
+                        firstReader = current;
+                        firstReaderHoldCount = 1;
+                    } else if (firstReader == current) {
+                        firstReaderHoldCount++;
+                    } else {
+                        if (rh == null)
+                            rh = cachedHoldCounter;
+                        if (rh == null || rh.tid != getThreadId(current))
+                            rh = readHolds.get();
+                        else if (rh.count == 0)
+                            readHolds.set(rh);
+                        rh.count++;
+                        cachedHoldCounter = rh; // cache for release
+                    }
+                    return 1;
+                }
+            }
+        }
+
+// 释放共享资源
+protected final boolean tryReleaseShared(int unused) {
+            Thread current = Thread.currentThread();
+            if (firstReader == current) {
+                // assert firstReaderHoldCount > 0;
+                if (firstReaderHoldCount == 1)
+                    firstReader = null;
+                else
+                    firstReaderHoldCount--;
+            } else {
+                HoldCounter rh = cachedHoldCounter;
+                if (rh == null || rh.tid != getThreadId(current))
+                    rh = readHolds.get();
+                int count = rh.count;
+                if (count <= 1) {
+                    readHolds.remove();
+                    if (count <= 0)
+                        throw unmatchedUnlockException();
+                }
+                --rh.count;
+            }
+            for (;;) {
+                int c = getState();
+                int nextc = c - SHARED_UNIT;
+                if (compareAndSetState(c, nextc))
+                    // Releasing the read lock has no effect on readers,
+                    // but it may allow waiting writers to proceed if
+                    // both read and write locks are now free.
+                    return nextc == 0;
+            }
+        }
+```
+
+#### WriteLock
+
+```java
+// AQS
+public final void acquire(int arg) {
+        if (!tryAcquire(arg) &&
+            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+            selfInterrupt();
+    }
+// RRW.writeLock
+protected final boolean tryAcquire(int acquires) {
+            Thread current = Thread.currentThread();
+            int c = getState();
+  					// w为写锁数量
+            int w = exclusiveCount(c);
+            if (c != 0) {
+                // (Note: if c != 0 and w == 0 then shared count != 0)
+              	// 当无写锁或写锁占有线程不为当前线程
+                if (w == 0 || current != getExclusiveOwnerThread())
+                    return false;
+                if (w + exclusiveCount(acquires) > MAX_COUNT)
+                    throw new Error("Maximum lock count exceeded");
+                // Reentrant acquire
+              	// 直接获取，此时肯定已经获得锁
+                setState(c + acquires);
+                return true;
+            }
+  					// 以下流程c=0，无任何读写锁
+  					// 非公平模式下不阻塞，公平模式下需要观察排队情况
+            if (writerShouldBlock() ||
+                // 直接CAS替换，失败返回false
+                !compareAndSetState(c, c + acquires))
+                return false;
+            setExclusiveOwnerThread(current);
+            return true;
+        }
+```
 
 ### LockSupport
 
@@ -2175,6 +2401,39 @@ public class StampedLockTest {
 - 所有释放锁的方法，都需要一个邮戳，且必须和获取锁时得到的stamp一致
 - 不可重入，写锁不可重复获取
 - 支持读写锁之间的互相转换
+- 当入队一个线程时，如果队列是读节点，不会连接到对尾，而是链接到该节点的cowait的指针，cowait本质上是一个栈，先进后出，后续先唤醒栈顶元素
+- 当入队一个线程时，如果是写节点，链接到对尾
+- 唤醒规则和AQS类似，先唤醒等待队列头部节点，不同的是会把cowait链上的所有节点唤醒
+
+#### 内部变量
+
+- state：(位数从右往左开始算)写锁状态处于第8位（为1表示写锁锁定中）；读取使用前1-7位，为0-127
+- readerOverflow：由于state只有7位表示读锁重入数，所有超过128之后的重入数记录在readerOverflow中
+
+#### writeLock
+
+```java
+// 判断是否存在读写锁，若不存在即可直接更新写锁表示。若不存在或更新失败则进入等待队列获取锁
+public long writeLock() {
+        long s, next;  // bypass acquireWrite in fully unlocked case only
+        return ((((s = state) & ABITS) == 0L &&
+                 U.compareAndSwapLong(this, STATE, s, next = s + WBIT)) ?
+                next : acquireWrite(false, 0L));
+    }
+```
+
+#### readLock
+
+```java
+// 判断是否存在写锁，若不存在直接读锁重入数加一，否则进入等待队列
+// 在加入等待队列前，进行了多次CAS替换，方法比较复杂
+public long readLock() {
+        long s = state, next;  // bypass acquireRead on common uncontended case
+        return ((whead == wtail && (s & ABITS) < RFULL &&
+                 U.compareAndSwapLong(this, STATE, s, next = s + RUNIT)) ?
+                next : acquireRead(false, 0L));
+    }
+```
 
 ### wait和notify
 
