@@ -240,7 +240,7 @@ RocketMQ通过内存映射文件提高IO性能，无论CommitLog、ConsumeQueue�
 
 #### 4.4.1 MappedFileQueue映射文件队列
 
-MappedFile类对应CommitLog文件
+一个ConsumeQueue表示一个topic下一个队列的保存信息。一个队列下有很多consumeQueue文件，每个MappedFile对应一个CommitLog文件，consumeQueue通过MappedFileQueue保存文件列表
 
 MappedFileQueue核心属性
 
@@ -325,12 +325,15 @@ MappedFileQueue核心属性
 
 **4.通过偏移量获取消息#getData(final long offset)**
 
-
 #### 4.5.2 Consumequeue
+
+为方便根据topic查询消息，新增consumequeue文件，即索引文件。
 
 为查询主题的消息（全部主题消息均保存在一套commitLog文件），设计了消息队列。消息队列的一级目录为topic，二级目录为消息队列。文件名最初消息的偏移量，比如第一个文件满之后，第二个文件名为00...06000000，起始偏移量600W
 
 每个ConsumeQueue不会保存全量消息，仅保存 commitLog offset(8B，消息偏移量)+size(4B)+tag hashcode(8B)。每个消息20字节，每个文件固定30万个条目
+
+刷盘时机：每隔一秒刷盘一次（两次刷盘间隔时间），对所有的topic-queue进行串行刷盘，通过FlushConsumeQueueService控制
 
 **1、根据消息逻辑偏移量startIndex查询#getIndexBuffer(final long startIndex)**
 
@@ -340,13 +343,17 @@ MappedFileQueue核心属性
 
 首先根据时间戳查询第一个更新时间大于该时间戳的物理文件(每个ConsumeQueue文件保存最后更新时间)；再采用二分法检索，获取最大和最小偏移量（文件中有保存），获得中间偏移量和消息大小，通过这两个字段查询CommitLog得出保存时间，用保存时间与入参时间戳对比。相等则返回，不相等则二分
 
-ConsumeQueue类对应一个topic下一个队列，ConsumeQueue类中存在所有文件列表，保存在mappedFileQueue中。每个ConsumeQueue文件对应一个MapperFile类
+ConsumeQueue类对应一个topic下一个队列，ConsumeQueue类中存在所有文件列表，保存在mappedFileQueue中。
 
 #### 4.5.3 IndexFile索引文件
 
-索引文件以创建时时间戳为文件名
+> 当消息保存到commitlog文件后，再由特定线程转发保存到index文件
+
+索引文件以命名规则：yyyyMMddHHmmssSSS
 
 索引文件分为 IndexHeader头部、500万个Hash槽（每个4字节）、2000万个Index条目列表（每条目20字节）。顺序存储
+
+刷盘时机：当上一个IndexFile文件条目满了才进行一次刷盘。IndexService控制
 
 **IndexHeader头部**：40字节。记录消息最小、最大存储时间，消息最小、最大偏移量。hashSlotCount：槽已使用个数；index条目已使用个数
 
@@ -356,7 +363,7 @@ ConsumeQueue类对应一个topic下一个队列，ConsumeQueue类中存在所有
 
 1. hashcode: key的hashcode
 2. phyoffset：消息对应的物理偏移量
-3. timedif：该消息存储与第一条消息存储的时间差
+3. timediff：该消息存储与第一条消息存储的时间差
 4. preIndexNo：该槽中该条目前一条index索引，不存在则为0。hash冲突链式扩展
 
 每增加一个index条目，就往index条目列表中顺序追加。IndexHeader通过indexCount记录当前已使用index条目数量。hash槽保存的是key（hashcode）对应index索引，出现hash冲突时保存最新index索引。通过preIndexNo追溯上一条冲突索引
@@ -397,9 +404,110 @@ msgId为长度32位的十六进制字符串，由两部分组成，分别为brok
 
 ### 4.6 实时消息消费队列与索引文件
 
-消息消费队列文件、索引文件都基于commitlog文件，需要及时更新，否则消息无法被及时消费。RocketMQ通过线程ReputMessageService来准实时转发CommitLog文件更新事件，更新ConsumeQueue和IndexFile文件
+消息消费队列文件、索引文件都基于commitlog文件，需要及时更新，否则消息无法被及时消费。
+
+RocketMQ通过线程ReputMessageService来监听CommitLog文件，定时同步（同步完一个后休息1ms继续）到CommitLog文件更新事件，此处同步更新ConsumeQueue和IndexFile文件
+
+```java
+// DefaultMessageStore.ReputMessageService
+// step1. run函数
+@Override
+        public void run() {
+            DefaultMessageStore.log.info(this.getServiceName() + " service started");
+
+            while (!this.isStopped()) {
+                try {
+                    Thread.sleep(1);
+                    this.doReput();
+                } catch (Exception e) {
+                    DefaultMessageStore.log.warn(this.getServiceName() + " service has exception. ", e);
+                }
+            }
+
+            DefaultMessageStore.log.info(this.getServiceName() + " service end");
+        }
+// step2. 触发commitlog后置更新事件
+SelectMappedBufferResult result = DefaultMessageStore.this.commitLog.getData(reputFromOffset);
+// 从result中一条条读取消息
+                            DispatchRequest dispatchRequest =
+                                DefaultMessageStore.this.commitLog.checkMessageAndReturnSize(result.getByteBuffer(), false, false);
+                            int size = dispatchRequest.getBufferSize() == -1 ? dispatchRequest.getMsgSize() : dispatchRequest.getBufferSize();
+...
+DefaultMessageStore.this.doDispatch(dispatchRequest);
+// step3. 更新consumeQueue和indexFile文件
+public void doDispatch(DispatchRequest req) {
+        // dispatcherList包含consumeQueue和indexFile两种文件
+        for (CommitLogDispatcher dispatcher : this.dispatcherList) {
+            dispatcher.dispatch(req);
+        }
+    }
+```
+
+#### 4.6.1 同步到consumeQueue文件
+
+将一条消息同步到consumeQueue文件中，即取出消息物理偏移量、大小、tag hashCode写入到ByteBuffer中，并根据consumeQueueOffset计算ConsumeQueue的物理地址，追加到内存中，然后刷盘到磁盘。ConsumeQueue的刷盘方式默认固定为异步刷盘
+
+```java
+// ConsumeQueue.class
+// 保存一条消息到consumeQueue中
+public void putMessagePositionInfoWrapper(DispatchRequest request) {
+  // ...
+  // 写入一条消息到内存中
+  boolean result = this.putMessagePositionInfo(request.getCommitLogOffset(),
+                request.getMsgSize(), tagsCode, request.getConsumeQueueOffset());
+}
+```
+
+#### 4.6.2 同步到IndexFile文件
+
+Step1：获取并创建indexFile文件，若文件为空则报错结束
+
+Step2：获取indexFile文件的消息最大偏移量，若消息偏移量小于该偏移量则表示为重复消息，忽略本次构建
+
+Step3：若消息keys不为空，将keys根据空格拆分成多个key，组装成保存至锁文件中realKey为{topic}#{key}，保存到IndexFile内存中，异步刷盘
+
+step4：计算realKey的hashCode，槽位置，条目位置
+
+> 一个broker一套index文件
+
+```java
+// step1
+IndexFile indexFile = retryGetAndCreateIndexFile();
+        if (indexFile != null) {
+          ...
+        }
+// step2
+if (msg.getCommitLogOffset() < endPhyOffset) {
+                return;
+            }
+// step3
+if (keys != null && keys.length() > 0) {
+                String[] keyset = keys.split(MessageConst.KEY_SEPARATOR);
+                for (int i = 0; i < keyset.length; i++) {
+                    String key = keyset[i];
+                    if (key.length() > 0) {
+                        indexFile = putKey(indexFile, msg, buildKey(topic, key));
+                        if (indexFile == null) {
+                            log.error("putKey error commitlog {} uniqkey {}", req.getCommitLogOffset(), req.getUniqKey());
+                            return;
+                        }
+                    }
+                }
+            }
+private String buildKey(final String topic, final String key) {
+        return topic + "#" + key;
+    }
+```
 
 ### 4.7 消息队列与索引文件恢复
+
+由于消息顺序存储在CommitLog文件中，通过后台线程监控同步转发到ConsumeQueue和IndexFile中，若保存CommitLog文件后程序退出，导致索引文件与CommitLog文件不一致，这样消息就永远不会被消费。RocketMQ通过abort文件来感知是否正常退出，然后通过checkPoint文件的刷盘点来恢复消息
+
+broker正常停止文件恢复：从倒数第三个开始恢复，若不足三个则从导数第一个文件开始恢复
+
+broker异常停止文件恢复：从最后一个文件往前找，找到第一个消息存储正常的文件（通过验证消息）
+
+> 恢复时可能导致消息重复保存
 
 ### 4.8 文件刷盘机制
 
@@ -413,7 +521,7 @@ RocketMQ的存储和读写是基于JDK NIO的内存映射机制的，消息首�
 
 **step1. 配置属性**
 
-1. fileReservedTime：文件保留时间，即文件过期时间
+1. fileReservedTime：文件保留时间，即文件写满后最长保存时间。默认72小时，当前broker推荐配置48小时
 2. deletePhysicalInterval：指删除两个文件的间隔，在一次清除中可能清除多个文件
 3. destroyMapedFileIntervalForcibly：被拒绝删除后文件的最大保留时间。在文件第一次删除后，通过该配置设置最长保留时间，在改时间范围内拒绝删除，引用减少1000；在改时间之外，文件被强制删除
 
@@ -421,7 +529,7 @@ RocketMQ的存储和读写是基于JDK NIO的内存映射机制的，消息首�
 
 1. 指定删除文件的时间点，通过deleteWhen设置一天删除一次，默认凌晨4点执行 [4:00, 5:00) 均可删除
 2. 判断磁盘空间是否充足。若磁盘空间不充足则可以删除
-3. 手动触发，默认配置触发次数20次，每次手动触发减一次。通过调用executeDeletedFileManualy方法删除
+3. 手动触发，默认配置触发次数20次，每次手动触发减一次。通过调用executeDeletedFileManualy方法删除，目前暂未封装触发RocketMQ删除的指令
 
 **默认配置属性**
 
@@ -432,6 +540,44 @@ RocketMQ的存储和读写是基于JDK NIO的内存映射机制的，消息首�
 5. diskSpaceCleanForciblyRatio：当磁盘分区超过该阙值，建议立即执行文件清理，但不会拒绝消息写入。通过－Drocketmq. broker. diskSpaceCleanForciblyRatio配置，默认0.85
 
 > 当磁盘使用率超过diskSpaceWarningLevelRatio，应该立即清理文件；磁盘使用率低于diskSpaceCleanForciblyRatio，磁盘恢复可写
+
+```java
+// DefaultMessageStore
+public void start() {
+  this.addScheduleTask();
+}
+public void addScheduleTask() {
+  // 定时扫描待清理文件。默认每隔10s清理一次
+        this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                DefaultMessageStore.this.cleanFilesPeriodically();
+            }
+        }, 1000 * 60, this.messageStoreConfig.getCleanResourceInterval(), TimeUnit.MILLISECONDS);
+}
+public void deleteExpiredFiles() {
+  // 判断是否到达删除文件的时间。默认每天4点进行删除
+  boolean timeup = this.isTimeToDelete();
+  // 判断磁盘空间是否爆满需要删除
+  boolean spacefull = this.isSpaceToDelete();
+  // 手动删除次数。默认20次
+  boolean manualDelete = this.manualDeleteFileSeveralTimes > 0;
+}
+// MappedFileQueue
+/**
+     * 扫描CommitLog文件列表，删除已过期的文件（排除最后一个文件，仅包括已写满的文件）。从最早的开始清理，一次最多清理10个文件
+     * @param expiredTime
+     * @param deleteFilesInterval 删除一个文件后的休眠时间
+     * @param intervalForcibly
+     * @param cleanImmediately 是否立即删除。若为true则不必判断文件是否过期
+     * @return
+     */
+    public int deleteExpiredFileByTime(final long expiredTime,
+        final int deleteFilesInterval,
+        final long intervalForcibly,
+        final boolean cleanImmediately) {
+    }
+```
 
 ### 总结
 
@@ -484,9 +630,9 @@ DefaultMQPushConsumer
 
 4. consumeThreadMax（默认20），消费者最大线程数。消费者线程使用无界队列，故消费者线程最大为consumeThreadMin
 
-5. consumeConcurrentlyMaxSpan(默认20)，并发消息消费者的最大跨度，当消息队列中的消息的最大偏移量大于消息最小偏移量consumeConcurrentlyMaxSpan，则停止50ms再拉取消息
+5. consumeConcurrentlyMaxSpan(默认2000)，并发消息消费者的最大跨度，当消息队列中的消息的最大偏移量大于消息最小偏移量consumeConcurrentlyMaxSpan，则停止50ms再拉取消息
 
-6. ?pullThresholdForQueue：默认1000，默认每1000次打印流控日志。（配置1没什么效果）
+6. ?pullThresholdForQueue：默认1000，默认每1000次打印流控日志。
 
 7. pullInterval=0，推模式下下次拉取间隔时间。默认拉取任务完成直接进行下一个拉取任务
 
@@ -497,6 +643,10 @@ DefaultMQPushConsumer
 10. suspendCurrentQueueTimeMillis(默认1s)：延迟将该消息提交到消费者线程的等待时间
 
 11. consumeTimeout(默认15分)：消息消费超时时间
+
+12. maxReconsumeTimes（默认-1，即重试18次）：最大重试次数
+
+13. messageDelayLevel：延迟等级，共18级。1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h
 
 ### 5.3 消费者启动流程
 
@@ -511,7 +661,7 @@ step3：初始化消息进度，如果是集群消息，则保存在broker端；
 
 step4：根据是否为顺序消息，创建线程消费
 
-step5：向MQClientInstance注册消费者，启动MQClientInstance，jvm中所有生产者、消费者公用一个MQClientInstance
+step5：向MQClientInstance注册消费者，启动MQClientInstance，jvm中所有生产者、消费者共用一个MQClientInstance
 
 ### 5.4 消息拉取
 
@@ -521,7 +671,7 @@ PullMessageService继承ServiceThread，属于一个线程类
 
 **处理请求**
 
-step1. 线程运行方法，不停地pullRequestQueue获取PullRequest，
+step1. 线程运行方法，不停地从pullRequestQueue中获取PullRequest，
 
 ```
 @Override
@@ -566,6 +716,12 @@ step3. impl.pullMessage(pullRequest) 拉取消息。通过监控消息缓存数�
 - nextOffset：待拉取的MessageQueue偏移量
 - lockedFirst：是否被锁定
 
+**processQueue**：消息队列缓存
+
+- msgCount：缓存消息数
+- msgSize：缓存消息大小
+- TreeMap<Long, MessageExt> msgTreeMap：key-消息在cq中的逻辑偏移量，通过this.msgTreeMap.lastKey() - this.msgTreeMap.firstKey() 计算消息最大跨度
+
 #### 5.4.2 ProcessQueue实现
 
 ProcessQueue是MessageQueue在消费端的重现、快照。PullMessageService默认从消息服务器拉取32条消息，放至ProcessQueue中，然后PullMessageService将消息提交到消费者线程池，最后消息消费成功后从ProcessQueue中移除。消费者线程 ConsumeMessageService#submitConsumeRequest 消费消息
@@ -606,8 +762,8 @@ if (this.isPause()) {
 
 Step2. 进行消息拉取流量控制。
 
-1. 消息处理总数和总大小。当消息总数大于1000或总大小大于100M，将pullRequest放回pullProcessQueue中，50s之后执行。结束本次拉取。每1000次打印警告日志
-2. ProcessQueue中队列最小偏移量和最大偏移量间距大于1000时触发流控，将pullRequest放回pullProcessQueue中，50s之后执行。结束本次拉取。每1000次打印警告日志
+1. 消息处理总数和总大小。当队列缓存消息总数大于1000或总大小大于100M，将pullRequest放回pullProcessQueue中，50ms之后执行，结束本次拉取，每1000次打印警告日志
+2. ProcessQueue中队列最小偏移量和最大偏移量间距大于1000时触发流控，将pullRequest放回pullProcessQueue中，50ms之后执行，结束本次拉取。每1000次打印警告日志
 
 step3. 构建消息拉取系统标记
 
@@ -725,7 +881,7 @@ RebalanceService每隔20s遍历MQClientInstance中的消费者列表；消费者
 
 step1. 创建消费任务线程，提交到线程池。若拉取的总消息数大于消费批次大小，则按照消费批次大小分为多个批次，每个批次用一个线程去消费
 
-```
+```java
 @Override
 public void submitConsumeRequest(
     final List<MessageExt> msgs,
@@ -768,7 +924,7 @@ public void submitConsumeRequest(
 
 step2. 运行消费线程，调用监听者消费函数
 
-```
+```java
 public void run() {
             if (this.processQueue.isDropped()) {
                 log.info("the message queue not be able to consume, because it's dropped. group={} {}", ConsumeMessageConcurrentlyService.this.consumerGroup, this.messageQueue);
@@ -924,10 +1080,56 @@ public void processConsumeResult(
     // 更新消息偏移量
     long offset = consumeRequest.getProcessQueue().removeMessage(consumeRequest.getMsgs());
     if (offset >= 0 && !consumeRequest.getProcessQueue().isDropped()) {
+      // 更新offset
         this.defaultMQPushConsumerImpl.getOffsetStore().updateOffset(consumeRequest.getMessageQueue(), offset, true);
     }
 }
 ```
+
+step4. 从内存中移除消息，取processQueue中最小偏移量为最新提交偏移量
+
+```java
+// 移除消息，并返回内存中消息队列最小偏移量
+    public long removeMessage(final List<MessageExt> msgs) {
+        long result = -1;
+        final long now = System.currentTimeMillis();
+        try {
+            this.lockTreeMap.writeLock().lockInterruptibly();
+            this.lastConsumeTimestamp = now;
+            try {
+                if (!msgTreeMap.isEmpty()) {
+                    result = this.queueOffsetMax + 1;
+                    int removedCnt = 0;
+                    for (MessageExt msg : msgs) {
+                        MessageExt prev = msgTreeMap.remove(msg.getQueueOffset());
+                        if (prev != null) {
+                            removedCnt--;
+                            msgSize.addAndGet(0 - msg.getBody().length);
+                        }
+                    }
+                    msgCount.addAndGet(removedCnt);
+
+                    // 返回processQueue中最小消息偏移量
+                    if (!msgTreeMap.isEmpty()) {
+                        result = msgTreeMap.firstKey();
+                    }
+                }
+            } finally {
+                this.lockTreeMap.writeLock().unlock();
+            }
+        } catch (Throwable t) {
+            log.error("removeMessage exception", t);
+        }
+```
+
+Step5. 更新offset到内存中，offsetTable结构。
+
+step6. offset异步持久化，将offset保存到broker端。集群模式下，RemoteBrokerOffsetStore类管理offset进度，通过后台持久化到broker中，持久化时机如下
+
+1. 当拉取消息时返回 OFFSET_ILLEGAL，目标offset太大或太小，可能不存在于当前commitlog文件中。此时进行指定队列持久化
+2. 移除无用的消息队列时，进行持久化
+3. 当DefaultMQPushConsumerImpl调用shutdown方法时进行持久化（还有pull模式消费者）
+4. MQClientInstance每隔5s进行一次offset持久化
 
 > 当消息返回RECONSUME_LATER后，消息仍然会向前推进。因为存储器会生成一条全新的消息，与原消息属性一致，拥有一个唯一的全新msgId，并存储原消息id。该消息会保存到commitLog文件中，与原消息无任何关联
 
@@ -1107,8 +1309,48 @@ ACK消息存入CommitLog后，定时消息通过延迟机制定时扫描拉取�
 物理文件地址{store}/config/consumeOffset.json，该文件存储每个主题每个消费者下所有队列的消费偏移量（逻辑偏移量，对应consumeQueue中的消息序号），初始偏移量0。
 
 ##### 5.6.3.3 消费进度设计思考
-1. 消费者线程池每消费完一个消息后，就会将消息从ProcessQueue移除，返回最小消息偏移量。
-2. 触发消息进度更新另一个时机在消息重新负载时，此时将ProcessQueue设置成Droped，持久化该消息队列的消费进度，并从内存中移除
+
+step1.消费者线程池每消费完一个消息后，就会将消息从ProcessQueue移除，返回最小消息偏移量。当不会重复消息，此时当broker重启则ProcessQueue内存信息丢失重载，又重最小消费进度开始消费，此时会产生消息重复消费
+
+```java
+public long removeMessage(final List<MessageExt> msgs) {
+        long result = -1;
+        final long now = System.currentTimeMillis();
+        try {
+            this.lockTreeMap.writeLock().lockInterruptibly();
+            this.lastConsumeTimestamp = now;
+            try {
+                if (!msgTreeMap.isEmpty()) {
+                    result = this.queueOffsetMax + 1;
+                    int removedCnt = 0;
+                    for (MessageExt msg : msgs) {
+                        MessageExt prev = msgTreeMap.remove(msg.getQueueOffset());
+                        if (prev != null) {
+                            removedCnt--;
+                            msgSize.addAndGet(0 - msg.getBody().length);
+                        }
+                    }
+                    msgCount.addAndGet(removedCnt);
+
+                    // 返回processQueue中最小消息偏移量
+                    if (!msgTreeMap.isEmpty()) {
+                        result = msgTreeMap.firstKey();
+                    }
+                }
+            } finally {
+                this.lockTreeMap.writeLock().unlock();
+            }
+        } catch (Throwable t) {
+            log.error("removeMessage exception", t);
+        }
+
+        return result;
+    }
+```
+
+
+
+step2.触发消息进度更新另一个时机在消息重新负载时，此时将ProcessQueue设置成Droped，持久化该消息队列的消费进度，并从内存中移除
 
 
 ```json
