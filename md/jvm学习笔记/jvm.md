@@ -184,6 +184,10 @@ GC Roots的对象
 
 #### 3.4.2 安全点
 
+- 安全点可理解为执行代码中的一些特殊位置，当遇到这些特殊位置时，线程可暂停。
+- 哪些地方可以防止安全点
+  - 理论上，所有的字节码边界都可以防止一个safepoint，当safepoint放置过多会导致内存占用过多，并且每次在经过安全点都需要检查jvm是否需要进入安全点
+  - 通过JIT编译的代码里，会在方法返回之前和无界循环回调之前防止一个安全点，每个安全点都会生成对应OopMap信息
 - 根结点枚举时并不需要检查所有执行上下文和全局变量引用的索引，其中hopspot中OopMap结构存储所有引用。但是并非每条指令都生成对应的OopMap，只是在特点位置-安全点生成OopMap，安全点由虚拟机选定，不能太少以至于让虚拟机等待时间过长，不能太多导致过分增大运行时的内存负荷。
 - 如何让线程在最近的安全点停顿
   - 抢先式中断，系统把所有的用户线程全部中断，若发现有现成不在安全点上，则让其恢复，运行到安全点上再中断。现在几乎没有虚拟机采用这种做法
@@ -735,6 +739,15 @@ javap -c Main.class 反编译
 - 使用线程上下文类加载器，实现父类加载器请求子类加载器完成类加载，例如JDCI、JDBC、JCE等服务
 - 对程序动态性的追求，热部署，通过自定义加载器加载，树形结构查找，破坏双亲委派模型
 
+双亲委派机制优点
+
+- 避免类重复加载，保证了类的唯一性
+- 避免核心类被篡改
+
+双亲委派机制缺点
+
+- 类加载是单项的，父类加载器加载的类不能访问子类加载器加载的类
+
 ##### 6.3.1 tomcat类加载机制
 
 https://blog.csdn.net/weixin_41835612/article/details/111401857
@@ -764,7 +777,7 @@ tomcat类加载
 4. 若设置delegateLoad=true，则优先使用parent加载（sharedClassLoader/commonClassLoader）加载
 5. 在web应用目录中加载类，即自己加载
 6. 若delegateLoad=false，则尝试使用父类加载器加载
-7. 都加在失败，抛出异常
+7. 都加载失败，抛出异常
 
 tomcat默认未配置<loader delegate="true"/>，则delegate默认false
 
@@ -785,7 +798,7 @@ tomcat默认未配置<loader delegate="true"/>，则delegate默认false
 
 2. 操作数栈，方法执行过程存放变量。大多数虚拟机优化处理中，会使得两个栈帧的局部变量表和操作数栈共享部分内存
 
-3. 动态链接，每个栈帧都包含一个运行时常量池中该栈帧所属方法的引用，持有这个引用是为了支持方法调用过程中的动态链接。
+3. 动态链接，每个栈帧都包含一个指向运行时常量池中该栈帧所属方法的引用，持有这个引用是为了支持方法调用过程中的动态链接。可以理解为指向常量池中的方法编译的字节码文件，执行
 
    > 常量池中保存了符号引用，当进行方法调用时，通过符号引用作为参数代表方法来进行调用。这些符号引用，有些在类加载时就被转化为直接引用，这种转化称为静态解析；有些在运行时被转化为直接引用，这部分称为动态链接
 
@@ -821,6 +834,37 @@ java虚拟机提供5条方法调用字节码指令
 自动装箱，转换为父类。
 
 **动态分派**：在运行期间根据实际类型确定运行的版本称为动态分配。与重写有密切关联，动态只涉及到方法，通过指令invokevirtual实现，字段不参与多态，只通过静态类型确定，方法（重写）参与多态
+
+```java
+public class Demo {
+  	static abstract class Human {}
+    static class Man extends Human {}
+    static class Woman extends Human {}
+    public void sayHello(Human human) {
+        System.out.println("hello, human");
+    }
+    public void sayHello(Man human) {
+        System.out.println("hello, Man");
+    }
+    public void sayHello(Woman human) {
+        System.out.println("hello, woman");
+    }
+  public static void main(String[] args) {
+        Human man = new Man();
+        Human woman = new Woman();
+        Assign assign = new Assign();
+        assign.sayHello(man);
+        assign.sayHello(woman);
+        assign.sayHello((Man)man);
+        assign.sayHello((Woman) woman);
+    }
+}
+// 输出
+hello, human
+hello, human
+hello, Man
+hello, woman
+```
 
 ```
 动态类型语言：类型检查的主体过程是在运行期而不是编译期
@@ -1241,10 +1285,10 @@ https://www.jianshu.com/p/22b5a0a78a9b
 
 锁撤销
 
-- 安全点撤销撤下如下
+- 安全点撤销锁如下
 - 非安全点撤销
   - 若为匿名偏向锁，CAS修改为无锁状态，成功则升级为轻量级锁，失败再进入单个**撤销动作**
-  - 若发生了批量重定向，判断是否支持重定向，若支持则CAS重偏向为当前线程（成功在升级为轻量级锁，失败在进一步撤销）。若不支持重定向（CAS修改为无锁状态，成功再升级为轻量级锁，失败再进一步撤销）
+  - 若发生了批量重定向，判断是否支持重定向，若支持则CAS重偏向为当前线程（成功则直接获取偏向锁，失败再进一步撤销）。若不支持重定向（CAS修改为无锁状态，成功再升级为轻量级锁，失败再进一步撤销）
   - 若发生了批量撤销，都升级为轻量级锁
 
 ![](../../image/19073098-991e7705845df1a8.webp)
@@ -1333,10 +1377,6 @@ epoch：表示偏向锁的版本
 >
 > 偏向锁状态下计算hashcode为什么直接升级为重量级锁，而不是轻量级锁？因为线程id已经占领hashcode的位置，无法保存新的hashCode。猜测此处应该不允许本地变量临时保存hashcode
 
-**偏向锁撤销**
-
-当发生锁竞争失败时，需要撤销偏向锁。在安全点处暂停原持有偏向锁线程，判断线程是否活跃且是否未退出同步块，若是，则升级为轻量级锁；否则偏向锁替换为新线程。上述判断是否活跃或退出同步块，通过jvm某配置设置为true才需要判断，默认为false，所以偏向锁一旦发生竞争直接升级为重量级锁，不管原线程活跃结束与否
-
 ###### 10.2.3.6 Mark Word实验
 
 https://www.cnblogs.com/LemonFive/p/11246086.html
@@ -1365,19 +1405,17 @@ Instance size: 16 bytes
 Space losses: 0 bytes internal + 3 bytes external = 3 bytes total
 ```
 
-第一行(0,4)：表示Mark Word，前八位分别为
+第一行、第二行(0,8)：表示Mark Word，前八位分别为
 
 ```
 未使用unused-1bit  分代年龄age-4bit  偏向标记biased_lcok-1bit  锁标志位lock-2bit
 ```
 
-第二行(4,4)：表示对象引用
-
 第三行(8,4)：表示压缩指针
 
 第四行(12,1)：表示对象内变量flag
 
-第五行(13,3)：补齐内存，抱枕对象大小为8字节整数倍
+第五行(13,3)：补齐内存，保证对象大小为8字节整数倍
 
 ```java
 package com.ysc.springboot.jvm;
@@ -1556,6 +1594,259 @@ jdk6引入的锁优化措施，目的是为了消除在无竞争情况下的同�
 
 偏向锁属于无锁状态，轻量级锁为乐观锁，重量级锁为悲观锁
 
+### 11 前端编译优化
+
+### 12 后端编译优化
+
+#### 12.2 即时编译器
+
+当虚拟机发现某段代码运行特别频繁，则把这部分“热点代码”编译成本地机器码，完成这个编译过程的叫做即时编译器
+
+##### 12.2.1 编译器与解释器
+
+解释器：边解释边执行，主要用于项目启动时代码执行或者编译器无法编译的代码执行
+
+编译器：将热点代码编译成本地代码，加快执行，更消耗内存
+
+编译器分为客户端编译器和服务端编译器，分别通过参数-client和-server指定
+
+编译器与解释器的配合模式
+
+- mixed mode：默认，混合模式。前期使用解释器，后续随着编译器的编译的本地代码增多，尽量使用编译器
+- 解释器模式：-Xint，仅使用解释器
+- 编译器模式：-Xcomp，优先选择编译器，但解释器需要在无法编译的情况下介
+
+```sh
+➜  ~ java -version
+java version "1.8.0_201"
+Java(TM) SE Runtime Environment (build 1.8.0_201-b09)
+Java HotSpot(TM) 64-Bit Server VM (build 25.201-b09, mixed mode)
+➜  ~ java -Xint -version
+java version "1.8.0_201"
+Java(TM) SE Runtime Environment (build 1.8.0_201-b09)
+Java HotSpot(TM) 64-Bit Server VM (build 25.201-b09, interpreted mode)
+➜  ~ java -Xcomp -version
+java version "1.8.0_201"
+Java(TM) SE Runtime Environment (build 1.8.0_201-b09)
+Java HotSpot(TM) 64-Bit Server VM (build 25.201-b09, compiled mode)
+```
+
+编译器分层编译，从下至上
+
+1. 纯解释器执行，解释器不开启监控
+2. 客户端编译器编译热点代码，进行可靠优化，解释器不开启监控
+3. 客户端编译器执行，仅开启方法及回边统计次数等有限性能监控
+4. 客户端编译器执行，开启所有性能监控
+5. 使用服务端编译器编译本地代码，相比客户端，服务端会启动耗时更长的优化，还会根据监控信息进行一些不可靠的激进优化
+
+##### 12.2.2 编译对象和触发条件
+
+**即时编译器编译的对象是热点代码，热点代码主要有两类**
+
+1. 被多次调用的方法。将整个方法作为编译对象
+2. 被多次执行的循环体。将整个方法作为编译对象，但编译时传入入口字节码序号，表示编译代码块，该编译过程称为“栈上替换 OSR”
+
+**判断热点的标准及方法**
+
+1. 基于采样的热点探测法。虚拟机周期性的检查各个线程的栈顶，若发现某个方法经常出现在栈顶，则称它为热点方法。实现简单，但很难精确地确认方法热度
+2. 基于计数的热点探测法。对方法或代码块创建计数器，记录执行次数。实现较为麻烦，需要为每个方法和循环体创建计数器及计数
+
+hotspot采用基于计数的热点探测法来识别热点代码。开启方法调用计数器和回边计数器（回边指在循环边界来回跳转，并非每次循环都算一次回边，空循环就不算）
+
+当调用方法或循环体时，优先使用编译过的版本；若不存在再对计数器加一；
+
+**方法调用计数器**
+
+当两计数器之和超过阈值，则向编译器提交该方法的编译请求，再通过解释器继续执行。客户端模式阈值为1500次，服务端模式为10000次，阈值可通过-XX:CompileThreshold配置（默认10000）
+
+方法调用技术器并发绝对的调用次数，它会随着的周期的推进而衰减，每次减少一半。衰减周期通过-XX：CounterHalfLifeTime配置（单位秒）。也可通过配置参数-XX: -UseCounterDecay（默认true）关闭衰减策略
+
+**回边计数器**
+
+当两计数器之和超过阈值后，则提交一个编译请求，并发回边计数器降低一些，继续在解释器中执行
+
+回边计数器通过计数器阈值*OSR碧绿再除以100获得。都取默认值时，客户端模式阈值为13995，服务端阈模式值为10700
+
+> 问题：一个方法存在两个循环体，那存在几个回边计数器？应该是一个，按照方法编译，然后累加模式，当方法编译完成后，方法及所有回边循环都能使用
+
+##### 12.2.3 编译过程
+
+提交编译请求后，后台进行编译，当前任务继续通过解释器执行。可以通过配置-XX:-BackgroundCompilation（默认true）来关闭后台编译，阻塞等待编译完成
+
+编译器主要进行代码优化编译，分为三段式编译器
+
+1. 在平台独立的前端将字节码构成高级代码表示（HIR），在此之前编译器进行一些优化：如方法内联，常量传播
+2. 一个平台相关的后端从HIR产生的低级中间代码表示（LIR），在此之前已经完成的优化：控制检查消除、范围检查消除
+3. 在平台相关的后端使用线性扫描算法，在LIR上分配寄存器，并在LIR上做窥孔优化，然后产生本期机器码
+
+![image-20210505094544227](../../image/image-20210505094544227.png)
+
+#### 12.3 提前编译器
+
+##### 12.3.1 提前编译器的优劣得失
+
+提前编译器研究的问题
+
+1. 与C、C++类似，在程序运行之前把程序代码翻译成机器码的静态编译工作。
+2. 把即时编译器运行时要做的编译工作提前准备好并保存下来，下次运行到这些代码直接加载进来。即帮助即时编译器做缓存预热
+
+即时编译器的优势
+
+1. 性能分析制导优化：即时编译器在运行过程中会收集性能监控信息，为一些热点方法、热点分支、抽闲类的实际类型尽量分配更多的资源（分支预测、寄存器、缓存），这些都必须在运行期间才能得出
+2. 激进预测性优化：静态优化必须要保证程序运行是正确的，而即时编译器可以进行一些激进预测性优化，按照高概率的预测路线执行，倘若出现问题，大不了再回退到解释器执行，但这种错误性肯定是很低的
+3. 链接时优化
+
+##### 12.3.2 Jaotc的提前编译
+
+jdk9引入了支持对class文件和模块进行提前编译的工具jaotc，以减少程序的启动时间和到达全速性能的预热时间，jaotc是基于graal编译器开发的
+
+目前jaotc只支持G1和Parallel（PS+PS old）两种垃圾收集器
+
+#### 12.4 编译器的优化技术
+
+##### 12.4.1 优化技术概览
+
+##### 12.4.2 方法内联
+
+方法内联：通俗的讲是将方法内部调用其他方法的逻辑，嵌入的本方法中，直接在本地方法执行，不再调用目标方法，减少方法查找、栈帧创建的一些消耗
+
+方法内联的条件
+
+- -XX:InlineSmallCode：默认2000，如果目标方法已被编译，且字节码大小超过该值，则无法内联
+- -XX:MaxTrivialSize：默认6，若方法的字节码小于该值，直接内联
+- -XX:MinInliningThreshold：默认250，若目标方法调用次数小于该值，则无法内联
+- -XX:InlineFrenquencyCount：默认100，若方法调用此大于该值，则认为是热点方法
+- -XX:MaxInlineSize：默认35，若非热点方法字节码大小超过该值，则无法内联
+- -XX:FreqInlineSize：默认325，若热点方法字节码大小超过该值，则无法内联
+- -XX:LineNodeCountInliningCutof：默认40000，编译过程中IR节点的上限
+
+**虚方法内联**
+
+内联方法尽量使用private、static、final修饰，这样jvm可以直接内联。若方法被public、protect修饰，则jvm还需判断实际执行方法是否为子类的方法，选择命中调用频率高的实现，所以需要在运行才能决定内联
+
+##### 12.4.3 逃逸分析
+
+逃逸分析：当对象被传入到调用方法中，称为方法逃逸；当对象可以被外部线程访问时（比如在传入方法中被静态变量引用），称为线程逃逸
+
+栈上分配：对象直接分配在栈上，随着栈的调用结束而销毁，避免分配在堆上而进行回收产生的消耗。栈上分配支持方法逃逸，不支持线程逃逸
+
+标量替换：指将聚合量拆分成标量标量的过程（标量：原始数据类型，比如int，float等，聚合量，多种标量数据的聚合，比如对象）。若逃逸分析确定对象不会被外部方法访问，则可进行标量替换优化，减少对象创建带来的消耗
+
+同步消除：消除多余的同步方法。若确定对象不会被外部方法访问，则可消息同步措施
+
+jvm参数配置
+
+- -XX：+DoEscapeAnalysis：开启逃逸分析，jdk6+默认true
+- -XX：+EliminateAllocation：开启标量替换，默认true
+- -XX：+EliminateLock：开启同步消除，默认true
+- -XX：+PrintEscapeAnalysis：打印逃逸分析结果，仅支持在debug的jvm版本下使用
+- -XX：+PrintEliminateAllocations：打印标量替换信息，仅支持在debug的jvm版本下使用
+
+**拓展**
+
+https://segmentfault.com/a/1190000021097119
+
+```java
+static void create() {
+  BigInstance bigInstance = new BigInstance();
+}
+
+static void create2(BigInstance instance) {
+  BigInstance bigInstance = instance;
+}
+
+private static BigInstance bigInstance;
+static void create3(BigInstance instance) {
+  bigInstance = instance;
+}
+// -Xms10m -Xmx10m -XX:+PrintGCDetails -server
+static void escape() {
+  long start = System.currentTimeMillis();
+  for (int i = 0; i < 1000000000; ++i) {
+    //1 分配在栈上
+    //            create();
+    //2 分配在栈上
+    create2(new BigInstance());
+    //3 分配在堆上
+    //            create3(new BigInstance());
+  }
+  System.out.println(System.currentTimeMillis() - start);
+}
+```
+
+DoEscapeAnalysis和EliminateAllocations关闭了任意一个，则不开启逃逸分析优化，主动在堆上分配内存
+
+**逃逸分析优化分析**
+
+```java
+// 0：原始代码版本
+public int test(int x) {
+  int xx = x + 2;
+  Point point = new Point(xx, 42);
+  return point.getX();
+}
+// 1：进行内联优化
+public int test(int x) {
+  int xx = x + 2;
+  Point point = point_memory_alloc();
+  p.x = xx;
+  p.y = 42;
+  return p.x;
+}
+// 2：进行逃逸分析，p不会逃逸，进行标量替换
+public int test(int x) {
+  int xx = x + 2;
+  int px = xx;
+  int py = 42;
+  return px;
+}
+// 3：进行数据流分析，剔除无用代码
+public int test(int x) {
+  return x + 2;
+}
+```
+
+##### 12.4.4 公共子表达式消除
+
+替换公共子表达式
+
+```java
+// 0.原始代码
+int d = (c * b) * 12 + a + (a + b * c)
+// 1. 公共子表达式替换，c*b等价于b*c，且计算前后b和c不会改变，用E替换
+int d = E*12+a+a+E
+// 2. 进行另一种优化，代数化简
+int d = E*13+a+a
+```
+
+##### 12.4.5 数据边界检查消除
+
+通常的，在遍历数组的时候，需要校验数组下标i>=0 && i < arr.length，才能进行遍历，这样每次遍历都产生了检查消耗。编译机器对此进行优化，判断若变量肯定在[0, arr.length)则消除边界检查
+
+**空指针对象检查**
+
+```java
+if (obj != null) {
+  return obj.val;
+} else {
+  throw new RunTimeException();
+}
+```
+
+通常对象使用如下，这样每次获取对象值时都需要额外一次的空校验消耗。虚拟机可能对上述代码进行如下优化
+
+```java
+try {
+  return obj.val;
+} catch(segment_fault) {
+  uncommon_trap();
+}
+```
+
+虚拟机会注册一个异常处理器（并非真正意义删的try-catch），减少的对象的判空检验。但是当对象为空时，必须转到异常处理器处理恢复中断并抛出空指针异常，需要进行一次额外的用户态到内核态的切换，消耗更大。所以虚拟机仅在对象大概率不为空的情况下才进行如上优化
+
+其他还有自动装箱消除、安全点消除、反射消除等
+
 ### 调优
 
 #### 1. 堆大小设置
@@ -1564,17 +1855,25 @@ jdk6引入的锁优化措施，目的是为了消除在无竞争情况下的同�
 
 建议初始堆大小和最大堆大小设置相同值，减少堆扩容的时间
 
+-XX:Newsize，-XX:Maxnewsize：表示年轻代大小
+
+-XX:Newratio：表示老年代与年轻代比例。如：为2表示老年代时年轻代的两倍
+
 #### 2. 永久代设置
 
 jdk1.7及之前，永久代满了会产生full gc，建议将MaxPermSize和MinPermSize设置成相同值，减少内存扩容带来的消耗
 
 Jdk1.8开始溢出了永久代，用元空间代替，元空间直接保存在内存而非jvm中，通过-XX:MaxMetaspaceSize设置元空间最大值，最大值默认无上限
 
+-XX:+UseCompressedClassPointers：开启类压缩指针。64位系统默认打开，对象中指向类元数据时使用的指针
+
+-XX:CompressedClassSpaceSize：默认1G，属于元空间。类指针压缩空间大小，
+
 #### 3. gc场景
 
 young/minor gc：年轻代gc
 
-Minor gc: 老年代gc
+Major gc: 老年代gc
 
 mixed gc：混合gc
 
@@ -1582,8 +1881,8 @@ full gc：全堆gc
 
 引发full gc的场景
 
-1. Perm空间不足
-2. CMS触发的promotion fail 和concurrent mode fail
+1. 元空间不足
+2. 老年代空间不足。CMS触发的promotion fail 和concurrent mode fail
 3. 主动调用System.gc()
 
 #### 4. 年轻代配置
@@ -1595,7 +1894,7 @@ full gc：全堆gc
 2. 过早提升，survivor区无法放下gc之后存活的大对象，导致对象直接进入老年代，对象过早提升，以致于老年代gc压力大。该情况可以尝试扩大survivor区
 3. 若对象多为长生命周期对象，可以减少进入老年代的gc年龄，让对象尽早进入老年代，且老年代应适量加大
 
-### 实战
+### 问题
 
 #### 1. jvm内存分析
 

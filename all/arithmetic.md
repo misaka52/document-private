@@ -78,8 +78,6 @@
 67. 类似于68-1，但是二叉搜索树改为了普通二叉树
 68. 给定一个数组 `nums` 和滑动窗口的大小 `k`，请找出所有滑动窗口里的最大值
 
-
-
 ## 其他
 
 1. https://www.nowcoder.com/practice/f33f5adc55f444baa0e0ca87ad8a6aac?tpId=117&tab=answerKey。给定两个字符串str1和str2,输出两个字符串的最长公共子串题目保证str1和str2的最长公共子串存在且唯一。
@@ -96,4 +94,23 @@
 4. 给定一个长度为N的整形数组arr，其中有N个互不相等的自然数1-N，请实现arr的[排序](https://www.nowcoder.com/jump/super-jump/word?word=排序)，但是不要把下标0∼N−1位置上的数通过直接赋值的方式替换成1∼N
 
 5. 给定一个[二叉树](https://www.nowcoder.com/jump/super-jump/word?word=二叉树)，请计算节点值之和最大的路径的节点值之和是多少，这个路径的开始节点和结束节点可以是[二叉树](https://www.nowcoder.com/jump/super-jump/word?word=二叉树)中的任意节点
+
+6. 求一个float数的立方根。二分法，牛顿迭代法
+
+7. 找出所有相加之和为 n 的 k 个数的组合，组合中只允许含有 1 - 9 的正整数，并且每种组合中不存在重复的数字，输入: k = 3, x = 9 输出: [[1,2,6], [1,3,5], [2,3,4]] 
+
+8. 一个环上有10个点,编号为0-9,从0点出发,每步可以顺时针到下一个点,也可以逆时针到上一个点,求:经过n步又回到0点有多少种不同的走法
+
+9. 求一个环形[链表](https://www.nowcoder.com/jump/super-jump/word?word=链表)的环的长度
+
+10. 给你两个非空的[链表](https://www.nowcoder.com/jump/super-jump/word?word=链表)，表示两个非负的整数。它们每位数字都是按照逆序的方式存储的，并且每个节点只能存储一位数字。请你将两个数相加，并以相同形式返回一个表示和的链表
+
+11. 验证二叉搜索树
+
+12. Leetcode300：最长上升子序列
+
+    1. 动态规范，O(n^2)
+    2. 贪心，O(nlogn)
+
+13. 
 

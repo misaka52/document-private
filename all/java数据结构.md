@@ -1,3 +1,26 @@
+## 概念
+
+### 红黑树
+
+https://blog.csdn.net/v_JULY_v/article/details/6105630?spm=1001.2014.3001.5506
+
+红黑树特性
+
+1. 二叉树
+2. 节点只存在两种颜色，红色或黑色
+3. 根节点是黑色的，叶节点（指NIL节点或NULL节点）是黑色的
+4. 红色节点的子节点都是黑色
+5. 所有从根节点的到的NIL节点路径上的黑色节点数均相同
+6. 红黑色的查询、插入、删除的时间复杂度均为logN（插入分三种情况讨论，删除分四种情况讨论）
+
+## util
+
+### ArrayList
+
+- 数组实现
+- 扩容时容量为原来的1.5倍
+- 遍历时不能remove
+
 ### HashMap
 
 存储键值对的数据结构，采用数组+链表+红黑树实现
@@ -11,12 +34,19 @@
 - 允许键值为null，对于null键，存入table[0]中
 - 链表长度大于8，且桶长度大于64，链表转成红黑树，否则之间简单扩容。删除数据时，红黑树节点过少时转成链表（在[2,6]范围内，具体要看红黑树结构），或者在扩容rehash时新树节点小于等于6转成链表
 - 仅当新增和删除数据modCount自增，扩容和更新时不变
+- hash算法，h ^ (h >>> 16)：为了减少哈希冲突，引入高位的对哈希结果的影响，加大低位的随机性，减少哈希冲突
 
 jdk8相对于jdk7变化
 
 - 引入了红黑树，对于长链表查询效率更高
 - 在resize时，链表依然按照顺序分配，不再逆序分配（jdk7链表逆序分配，实现简单，但在并发使用时可能产生死循环）
 - 添加元素，jdk8采用尾插法，jdk7采用头插法
+  - 头插法优点
+    - 头插法插入快实现简单，O(1)直接插入到表头，而尾插法需要遍历到链表尾节点再插入。
+    - 缓存设计优化，默认新插入节点被访问的频率高
+  - 头插法缺点
+    - 并发扩容时可能发生链表成环
+    - 扩容时，颠倒了链表元素的顺序
 
 ### LinkedHashMap
 
@@ -35,7 +65,7 @@ new LinkedHashMap<>(16, 0.75f, true);
 
 ### TreeMap
 
-排序map，key构成一棵二叉排序树，
+排序map，key构成一棵红黑树
 
 - key必须实现Comparable接口，实现compareTo方法
 
@@ -148,6 +178,267 @@ ThreadLocalMap包含实体组数，key为ThreadLocal变量，value为需要存�
 2. 内存泄露，Entry不能及时被清理
 
 **在使用完ThreadLocal后及时remove**
+
+#### set
+
+```java
+public void set(T value) {
+        Thread t = Thread.currentThread();
+        ThreadLocalMap map = getMap(t);
+        if (map != null)
+            map.set(this, value);
+        else
+            createMap(t, value);
+    }
+// 线程threadLocalmap初始化
+void createMap(Thread t, T firstValue) {
+        t.threadLocals = new ThreadLocalMap(this, firstValue);
+    }
+// map初始化
+ThreadLocalMap(ThreadLocal<?> firstKey, Object firstValue) {
+            table = new Entry[INITIAL_CAPACITY];
+  					// INITIAL_CAPACITY=16
+            int i = firstKey.threadLocalHashCode & (INITIAL_CAPACITY - 1);
+  					// map节点创建，key=threadLcoal，value=value
+            table[i] = new Entry(firstKey, firstValue);
+            size = 1;
+            setThreshold(INITIAL_CAPACITY);
+        }
+// 容量上限为数组打标的2/3
+private void setThreshold(int len) {
+            threshold = len * 2 / 3;
+        }
+// 保存key-value
+private void set(ThreadLocal<?> key, Object value) {
+
+            // We don't use a fast path as with get() because it is at
+            // least as common to use set() to create new entries as
+            // it is to replace existing ones, in which case, a fast
+            // path would fail more often than not.
+
+            Entry[] tab = table;
+            int len = tab.length;
+            int i = key.threadLocalHashCode & (len-1);
+
+  					// 找到当前ThreadLocal对应的桶位置，若发生冲突，则寻找下一个非空的Entry
+            for (Entry e = tab[i];
+                 e != null;
+                 e = tab[i = nextIndex(i, len)]) {
+                ThreadLocal<?> k = e.get();
+              	// threadLocal存在，值更新操作
+                if (k == key) {
+                    e.value = value;
+                    return;
+                }
+              	// 当key=null时，用新键值对替换，同时清理key=null的历史数据
+                if (k == null) {
+                    replaceStaleEntry(key, value, i);
+                    return;
+                }
+            }
+
+            tab[i] = new Entry(key, value);
+            int sz = ++size;
+            if (!cleanSomeSlots(i, sz) && sz >= threshold)
+                rehash();
+        }
+// 清理部分废弃节点
+private boolean cleanSomeSlots(int i, int n) {
+            boolean removed = false;
+            Entry[] tab = table;
+            int len = tab.length;
+            do {
+                i = nextIndex(i, len);
+                Entry e = tab[i];
+                if (e != null && e.get() == null) {
+                    n = len;
+                    removed = true;
+                    i = expungeStaleEntry(i);
+                }
+            } while ( (n >>>= 1) != 0);
+            return removed;
+        }
+private void rehash() {
+            expungeStaleEntries();
+
+            // Use lower threshold for doubling to avoid hysteresis
+            if (size >= threshold - threshold / 4)
+                resize();
+        }
+// 清理过期节点
+private void expungeStaleEntries() {
+            Entry[] tab = table;
+            int len = tab.length;
+            for (int j = 0; j < len; j++) {
+                Entry e = tab[j];
+                if (e != null && e.get() == null)
+                    expungeStaleEntry(j);
+            }
+        }
+private int expungeStaleEntry(int staleSlot) {
+            Entry[] tab = table;
+            int len = tab.length;
+
+            // expunge entry at staleSlot
+            tab[staleSlot].value = null;
+            tab[staleSlot] = null;
+            size--;
+
+            // Rehash until we encounter null
+            Entry e;
+            int i;
+            for (i = nextIndex(staleSlot, len);
+                 (e = tab[i]) != null;
+                 i = nextIndex(i, len)) {
+                ThreadLocal<?> k = e.get();
+              	// key为空直接清理该节点
+                if (k == null) {
+                    e.value = null;
+                    tab[i] = null;
+                    size--;
+                } else {
+                  	// 当key不为空时，则进行数据迁移，将后续发送冲突的节点往前挪，因为前面的节点被删除了，位置空出来了，方便后面的查询
+                    int h = k.threadLocalHashCode & (len - 1);
+                  	// h为哈希键定位的桶，i为实际保存的桶，当二者不等时则表明是发生了哈希冲突所致，此时进行迁移。从hash定位的桶位置开始，寻找第一个为空的节点保存
+                    if (h != i) {
+                        tab[i] = null;
+
+                        // Unlike Knuth 6.4 Algorithm R, we must scan until
+                        // null because multiple entries could have been stale.
+                      	// 找到下一个为空的节点，保存
+                        while (tab[h] != null)
+                            h = nextIndex(h, len);
+                        tab[h] = e;
+                    }
+                }
+            }
+            return i;
+        }
+// 扩容，容量变为原来的两倍，将老数据重新散列到新表中
+private void resize() {
+            Entry[] oldTab = table;
+            int oldLen = oldTab.length;
+            int newLen = oldLen * 2;
+            Entry[] newTab = new Entry[newLen];
+            int count = 0;
+
+            for (int j = 0; j < oldLen; ++j) {
+                Entry e = oldTab[j];
+                if (e != null) {
+                    ThreadLocal<?> k = e.get();
+                  	// 清空废弃节点
+                    if (k == null) {
+                        e.value = null; // Help the GC
+                    } else {
+                        int h = k.threadLocalHashCode & (newLen - 1);
+                        while (newTab[h] != null)
+                            h = nextIndex(h, newLen);
+                        newTab[h] = e;
+                        count++;
+                    }
+                }
+            }
+
+            setThreshold(newLen);
+            size = count;
+            table = newTab;
+        }
+```
+
+#### get
+
+```java
+public T get() {
+        Thread t = Thread.currentThread();
+        ThreadLocalMap map = getMap(t);
+        if (map != null) {
+            ThreadLocalMap.Entry e = map.getEntry(this);
+            if (e != null) {
+                @SuppressWarnings("unchecked")
+                T result = (T)e.value;
+                return result;
+            }
+        }
+  			// 当线程中不存在当前ThreadLocal对应的值，设置初始化值
+        return setInitialValue();
+    }
+private T setInitialValue() {
+  			// 获取初始化值，可通过重写该方法来设置初始值
+        T value = initialValue();
+        Thread t = Thread.currentThread();
+        ThreadLocalMap map = getMap(t);
+        if (map != null)
+            map.set(this, value);
+        else
+            createMap(t, value);
+        return value;
+    }
+private Entry getEntry(ThreadLocal<?> key) {
+            int i = key.threadLocalHashCode & (table.length - 1);
+            Entry e = table[i];
+            if (e != null && e.get() == key)
+                return e;
+            else
+              	// 若当前节点为空或当前hash桶key不等于当前key
+                return getEntryAfterMiss(key, i, e);
+        }
+// 若e为空直接返回空。若不为空则表示可能产生了哈希冲突，寻找下一个桶键值为key的桶
+private Entry getEntryAfterMiss(ThreadLocal<?> key, int i, Entry e) {
+            Entry[] tab = table;
+            int len = tab.length;
+
+            while (e != null) {
+                ThreadLocal<?> k = e.get();
+                if (k == key)
+                    return e;
+                if (k == null)
+                    expungeStaleEntry(i);
+                else
+                    i = nextIndex(i, len);
+                e = tab[i];
+            }
+            return null;
+        }
+```
+
+#### remove
+
+```java
+public void remove() {
+         ThreadLocalMap m = getMap(Thread.currentThread());
+         if (m != null)
+             m.remove(this);
+     }
+private void remove(ThreadLocal<?> key) {
+            Entry[] tab = table;
+            int len = tab.length;
+            int i = key.threadLocalHashCode & (len-1);
+            for (Entry e = tab[i];
+                 e != null;
+                 e = tab[i = nextIndex(i, len)]) {
+                if (e.get() == key) {
+                  	// 清理ThreadLocal引用
+                    e.clear();
+                  	// 清理Entry节点
+                    expungeStaleEntry(i);
+                    return;
+                }
+            }
+        }
+```
+
+#### 问题
+
+1. 发生的哈希冲突怎么办？
+   1. 开放地址法，找到下一个不为空的节点保存，步长为1。
+   2. 那么当hash键到冲突后的新键中间的键删除怎么办，怎么查询？当发生键删除时，会将删除节点后面发生冲突的节点往前挪，同时清理废弃节点
+2. 内存溢出
+   1. 垃圾回收针对对象来回收，但threadLocal无强引用时，经历一次gc可回收ThreadLoca对象和线程map里的弱引用，次数Entry节点仍未被清除
+   2. 节点清理实际
+      1. remove：直接清除ThreadLocal对应节点，以及后续废弃节点
+      2. get：当设置初始化值时或产生hash冲突往后遍历发现空key时，可清理
+      3. set：当发生hash重入往后寻找空节点时，若发现空key节点，可清理并替换。若找到新空节点，新增节点再清理部分废弃节点
+3. 完美散列：ThreadLocal类中存在一个静态变量nextHashCode，每次增长0x61c88647（黄金分割数，(根号5-1)*2^32，有符号位，再取正），每生成一个ThreadLocal增长一次，产生完美散列不会冲突（即使是一边扩容一边计算），以此减少hash冲突
 
 ## JUC
 
@@ -1107,7 +1398,7 @@ private final void addCount(long x, int check) {
 
 1. 扩容时，利用另一表nextTable进行数据迁移，每次扩容hash表增大为原来的两倍，容量阙值为0.75倍的哈希桶大小
 2. 扩容时，若当前未在扩容，则设置sizeCtl为一个较小的负数；若当前map正在扩容，sizeCtl加一，协助扩容
-3. 单线程实际扩容时，以stride长度为一个周期，每个周期迁移原哈希桶[transferIndex-stride, transferIndex-1]上的数据，一个周期迁移完成进行下一周期的迁移。没迁移一个哈希桶位置，都需要添加同步锁，将原表数据同步到新表高位低位两个桶中（先同步，再链接高位低位新链表），迁移完成后在原表哈希桶上放置迁移节点（迁移节点key哈希值为-1）
+3. 单线程实际扩容时，以stride长度为一个周期，每个周期迁移原哈希桶[transferIndex-stride, transferIndex-1]上的数据，一个周期迁移完成进行下一周期的迁移。每迁移一个哈希桶位置，都需要添加同步锁，将原表数据同步到新表高位低位两个桶中（先同步，再链接高位低位新链表），迁移完成后在原表哈希桶上放置迁移节点（迁移节点key哈希值为-1）
 4. 等到最后一个线程（通过迁移线程数sizeCtl计算得出）迁移完成，表示本次扩容结束
 
 ##### 7.1 扩容时机
@@ -1310,6 +1601,7 @@ private final void transfer(Node<K, V>[] tab, Node<K, V>[] nextTab) {
         else if ((fh = f.hash) == MOVED)            // CASE3：该旧桶已经迁移完成，直接跳过
             advance = true;
         else {                                      // CASE4：该旧桶未迁移完成，进行数据迁移
+          	// 加锁，防止桶新增元素
             synchronized (f) {
                 if (tabAt(tab, i) == f) {
                     Node<K, V> ln, hn;
@@ -1420,8 +1712,6 @@ public static int numberOfLeadingZeros(int i) {
         return n;
     }
 ```
-
-
 
 ### CopyOnWriteArrayList/CopyOnWriteArraySet
 
@@ -2081,9 +2371,9 @@ private boolean doAcquireNanos(int arg, long nanosTimeout)
 写锁可降级为读锁，不可升级
 
 - state字段，前16位表示读锁数量，后16位表示写锁数量
-
 - 当等待队列表头为互斥节点时，表示当前读锁被占用；当等待表头为共享节点时，表示当前写锁被占用，当写锁释放时，会以传播形式唤醒共享节点
 - HoldCounter、ThreadLocalHoldCounter：仅保存线程读锁的重入量
+- 当等待队列中表头为互斥节点，则添加的新的读锁，只有已获取锁的线程可重入，新线程的必须排队等待
 
 ```java
 // threadLocal变量，保存每个线程的读锁重入量
@@ -2401,8 +2691,8 @@ public class StampedLockTest {
 - 所有释放锁的方法，都需要一个邮戳，且必须和获取锁时得到的stamp一致
 - 不可重入，写锁不可重复获取
 - 支持读写锁之间的互相转换
-- 当入队一个线程时，如果队列是读节点，不会连接到对尾，而是链接到该节点的cowait的指针，cowait本质上是一个栈，先进后出，后续先唤醒栈顶元素
-- 当入队一个线程时，如果是写节点，链接到对尾
+- 当入队一个线程时，如果队尾是读节点，不会连接到对尾，而是链接到该节点的cowait的指针，cowait本质上是一个栈，先进后出，后续先唤醒栈顶元素
+- 当入队一个线程时，如果对尾是写节点，链接到对尾
 - 唤醒规则和AQS类似，先唤醒等待队列头部节点，不同的是会把cowait链上的所有节点唤醒
 
 #### 内部变量
@@ -2704,6 +2994,105 @@ data2 = exchanger.exchange(data2);
 // 交换后，数据对调
 ```
 
+### DelayQueue
+
+```java
+public class DelayQueue<E extends Delayed> extends AbstractQueue<E>
+    implements BlockingQueue<E> {
+  // 互斥锁
+  private final transient ReentrantLock lock = new ReentrantLock();
+  // 优先队列，最小堆
+    private final PriorityQueue<E> q = new PriorityQueue<E>();
+  // leader线程，表示对首元素获取线程，若不为空则表示leader线程正在等待获取对首元素，此时其他线程不可获取；若为空则表示无线程等待
+   private Thread leader = null;
+  // 条件队列
+  private final Condition available = lock.newCondition();
+}
+```
+
+#### put
+
+往队列中添加元素，若添加的元素为对首元素，即最早出队元素，则唤醒条件队列中一个等待线程
+
+```java
+public void put(E e) {
+        offer(e);
+    }
+public boolean offer(E e) {
+        final ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
+          	// 添加元素至队列中
+            q.offer(e);
+          // 若堆首元素为该元素，则唤醒条件队列中一个元素
+            if (q.peek() == e) {
+                leader = null;
+                available.signal();
+            }
+            return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+```
+
+#### take
+
+从队列中阻塞获取元素，若当前队列为空，则无限等待；
+
+若当前队列对首元素已过期，直接返回该元素；
+
+若leader非空，则表示有线程正在等待对首元素出队，当前线程进入无限等地啊
+
+若leader为空则占据leader线程，直接替换，此时已经获取到锁不存在并发替换问题。占领后等待对首元素剩余有效时间
+
+finally：若leader为空且队列非空，则唤醒一个处于等待的线程
+
+```java
+public E take() throws InterruptedException {
+        final ReentrantLock lock = this.lock;
+        lock.lockInterruptibly();
+        try {
+          	// 循环获取
+            for (;;) {
+                E first = q.peek();
+              	// 队列为空直接无限等待
+                if (first == null)
+                    available.await();
+                else {
+                    long delay = first.getDelay(NANOSECONDS);
+                  	// 队首不为空且已过期，直接返回该元素
+                    if (delay <= 0)
+                        return q.poll();
+                  	// 置空帮助回收
+                    first = null; // don't retain ref while waiting
+                  	// leader非空表示有任务正在等待中，进入无限等待
+                    if (leader != null)
+                        available.await();
+                    else {
+                      	// leader为空则占据leader线程，等待剩余有效时间
+                        Thread thisThread = Thread.currentThread();
+                        leader = thisThread;
+                        try {
+                            available.awaitNanos(delay);
+                        } finally {
+                            if (leader == thisThread)
+                                leader = null;
+                        }
+                    }
+                }
+            }
+        } finally {
+          	// 返回元素后，唤醒一个任务以获取对首元素
+            if (leader == null && q.peek() != null)
+                available.signal();
+            lock.unlock();
+        }
+    }
+```
+
+
+
 ## 线程池
 
 ### ThreadPoolExecutor
@@ -2904,6 +3293,7 @@ private Runnable getTask() {
                 Runnable r = timed ?
                   	// 超时返回null，发送中断则抛出中断异常
                     workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) :
+              			// 阻塞获取任务，直到获取到一个任务，可能抛出中断异常。
                     workQueue.take();
                 if (r != null)
                     return r;
@@ -2942,7 +3332,7 @@ private void interruptIdleWorkers(boolean onlyOne) {
         final ReentrantLock mainLock = this.mainLock;
         mainLock.lock();
         try {
-          	// 对所有的worker进行遍历，尝试加锁，不会中断正在运行的线程。运行中的线程会加锁
+          	// 对所有的worker进行遍历，尝试加锁（处于运行中的线程会加锁），不会中断正在运行的线程。运行中的线程会加锁
             for (Worker w : workers) {
                 Thread t = w.thread;
                 if (!t.isInterrupted() && w.tryLock()) {
@@ -3022,6 +3412,205 @@ SynchronousQueue：每个操作必须等待另一个线程的移除操作
 ### ScheduleThreadPool
 
 可以延迟执行任务，或定时执行任务。和Timer类似，但ScheduleThreadPool功能更强大，更灵活，可以在构造函数中指定多个对应的后台线程
+
+#### 等待队列
+
+DelayedWorkQueue和DelayQueue类似
+
+```java
+// DelayedWorkQueue.class
+static class DelayedWorkQueue extends AbstractQueue<Runnable>
+        implements BlockingQueue<Runnable> {
+  private RunnableScheduledFuture<?>[] queue =
+            new RunnableScheduledFuture<?>[INITIAL_CAPACITY];
+  private final ReentrantLock lock = new ReentrantLock();
+  private int size = 0;
+  private Thread leader = null;
+  private final Condition available = lock.newCondition();
+}
+public boolean add(Runnable e) {
+            return offer(e);
+        }
+public boolean offer(Runnable x) {
+            if (x == null)
+                throw new NullPointerException();
+            RunnableScheduledFuture<?> e = (RunnableScheduledFuture<?>)x;
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                int i = size;
+                if (i >= queue.length)
+                    grow();
+                size = i + 1;
+                if (i == 0) {
+                    queue[0] = e;
+                    setIndex(e, 0);
+                } else {
+                    siftUp(i, e);
+                }
+                if (queue[0] == e) {
+                    leader = null;
+                    available.signal();
+                }
+            } finally {
+                lock.unlock();
+            }
+            return true;
+        }
+public RunnableScheduledFuture<?> take() throws InterruptedException {
+            final ReentrantLock lock = this.lock;
+            lock.lockInterruptibly();
+            try {
+                for (;;) {
+                    RunnableScheduledFuture<?> first = queue[0];
+                    if (first == null)
+                        available.await();
+                    else {
+                        long delay = first.getDelay(NANOSECONDS);
+                        if (delay <= 0)
+                            return finishPoll(first);
+                        first = null; // don't retain ref while waiting
+                        if (leader != null)
+                            available.await();
+                        else {
+                            Thread thisThread = Thread.currentThread();
+                            leader = thisThread;
+                            try {
+                                available.awaitNanos(delay);
+                            } finally {
+                                if (leader == thisThread)
+                                    leader = null;
+                            }
+                        }
+                    }
+                }
+            } finally {
+                if (leader == null && queue[0] != null)
+                    available.signal();
+                lock.unlock();
+            }
+        }
+```
+
+#### 任务类型
+
+任务被封装为ScheduledFutureTask，用于定时延迟执行
+
+```java
+private class ScheduledFutureTask<V>
+            extends FutureTask<V> implements RunnableScheduledFuture<V> {
+  			// 任务序号，自增唯一
+        private final long sequenceNumber;
+
+  			// 任务首次执行时间
+        private long time;
+
+        // 任务执行周期。0-非周期任务，>0-固定周期任务，<0-固定延迟任务
+        private final long period;
+
+  			// 重试任务引用，因当前实现的原因，实际上每次都是指向自身
+        RunnableScheduledFuture<V> outerTask = this;
+
+        // 在堆中的索引
+        int heapIndex;
+    public void run() {
+              boolean periodic = isPeriodic();
+      				// 判断任务能否继续执行
+              if (!canRunInCurrentRunState(periodic))
+                  cancel(false);
+              else if (!periodic)
+                	// 非周期函数直接执行任务
+                  ScheduledFutureTask.super.run();
+      				// 周期函数执行任务后重置，下次继续执行
+              else if (ScheduledFutureTask.super.runAndReset()) {
+                	// 设置下次执行时间
+                  setNextRunTime();
+                	// 将当前任务重新添加等待队列中
+                  reExecutePeriodic(outerTask);
+              }
+          }
+  // 设置下次执行时间。若周期大于0，则下次执行时间为上次执行时间+周期；若周期小于0，则下次执行时间为当前时间+负周期
+  private void setNextRunTime() {
+            long p = period;
+            if (p > 0)
+                time += p;
+            else
+                time = triggerTime(-p);
+        }
+  void reExecutePeriodic(RunnableScheduledFuture<?> task) {
+        if (canRunInCurrentRunState(true)) {
+            super.getQueue().add(task);
+            if (!canRunInCurrentRunState(true) && remove(task))
+                task.cancel(false);
+            else
+                ensurePrestart();
+        }
+    }
+}
+```
+
+#### schedule
+
+延迟执行任务
+
+```java
+public ScheduledFuture<?> schedule(Runnable command,
+                                       long delay,
+                                       TimeUnit unit) {
+        if (command == null || unit == null)
+            throw new NullPointerException();
+        RunnableScheduledFuture<?> t = decorateTask(command,
+            new ScheduledFutureTask<Void>(command, null,
+                                          triggerTime(delay, unit)));
+        delayedExecute(t);
+        return t;
+    }
+private void delayedExecute(RunnableScheduledFuture<?> task) {
+        if (isShutdown())
+            reject(task);
+        else {
+          	// 添加任务
+            super.getQueue().add(task);
+            if (isShutdown() &&
+                !canRunInCurrentRunState(task.isPeriodic()) &&
+                remove(task))
+                task.cancel(false);
+            else
+                ensurePrestart();
+        }
+    }
+// 添加worker，若当前线程不足核心线程数时增加核心线程worker，若核心线程数设置为0则创建一个非核心线程worker来维护当前线程池
+void ensurePrestart() {
+        int wc = workerCountOf(ctl.get());
+        if (wc < corePoolSize)
+            addWorker(null, true);
+        else if (wc == 0)
+          	// 到这一步表示核心线程数为0
+            addWorker(null, false);
+    }
+```
+
+#### scheduleAtFixedRate
+
+固定周期任务，任务周期为delay。从上一任务开始时计时
+
+```
+public ScheduledFuture<?> scheduleAtFixedRate(Runnable command,
+                                              long initialDelay,
+                                              long period,
+                                              TimeUnit unit);
+```
+
+#### scheduleWithFixedDelay
+
+固定延迟任务，任务周期为delay（大于0，转换成任务后period为-delay）。从上一任务完成后计时
+
+```
+public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command,
+                                                 long initialDelay,
+                                                 long delay,
+                                                 TimeUnit unit);
+```
 
 ### ForkJoinPool
 

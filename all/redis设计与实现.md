@@ -324,7 +324,7 @@ Int32_t、int64_t类似
 
 **content**
 
-保存节点的值，可以是字节数组或整数
+保存节点的值的引用，可以是字节数组或整数
 
 ### 7.3 连锁更新
 
@@ -470,6 +470,8 @@ skiplist编码使用字典（查询O(1)）和跳跃表（范围型操作很快�
 ```sh
 zadd key score member [score member ...] # 为有序集合key添加元素
 zrange start end [withscore] # 查询集合下标区间值，添加withscore则额外展示分数
+zrevrange start end [withscore] #逆序查看元素
+zrem key member # 移除元素
 ```
 ### 8.7 类型检查与命令多态
 
@@ -931,6 +933,7 @@ Sentinel通过命令和订阅频道发送信息，通过订阅频道接受信息
 1. 在从服务器中选出一个转换为主服务器（选择slave_priority 可配置；复制偏移量最大的；id最小的从服务器作为主服务器）
 2. 让其他所有从服务器改为复制新主服务器
 3. 当原主服务器变为从服务器
+4. 更改哨兵监控的主节点
 
 
 ## 第17章 集群
@@ -948,7 +951,23 @@ cluster nodes #查看当前集群节点
 cluster meet <ip> <port> #与指定节点握手，将其加入集群
 ```
 
+clusterNode：每个节点一个，保存节点的名称、创建时间、ip、端口号等
+
+clusterLink：保存了连接节点的有关信息，如连接创建时间、输入输出缓冲区、套接字描述符
+
+clusterState：每个节点一个，保存集群当前状态、集群节点信息、集群节点个数等
+
+```c
+struct clusterNode {
+// ...
+// 如果这是一个从节点，那么指向主节点
+struct clusterNode *slaveof;
+// ...
+};
+```
+
 #### 17.1.3 cluster meet命令的实现
+
 当执行cluster meet命令后，A节点接B节点添加到集群中。其过程如下（类似三次握手）
 1. A节点为B节点创建clusterNodes结构，添加到clusterState.nodes字典里
 2. A节点通过指定的地址，向B节点发送meet命令
@@ -971,7 +990,7 @@ cluster meet <ip> <port> #与指定节点握手，将其加入集群
 struct struct clusterNode {
     // ...
     // 表示当前节点的槽处理关系
-    // 若slot在索引上第i位为1，则表示节点处理槽i
+    // 若slot在索引上第i位为1，则表示当前节点处理槽i，若为0表示不处理
     unsigned char slot[16384/8];
     // 处理槽的数量
     int numslots;
@@ -980,10 +999,10 @@ struct struct clusterNode {
 ```
 
 #### 17.2.2 传播节点的槽指派信息
-节点出了将自己负责的槽指派信息保存在slot和numslots中，还会将自己的slot信息发送给其他节点，节点记录在clusterState中。由此每个节点都知道所有槽的指派信息
+节点出了将自己负责的槽指派信息保存在slot和numslots中，还会将自己的slot信息通过消息发送给其他节点，节点记录在clusterState中。由此每个节点都知道所有槽的指派信息
 
 #### 17.2.3 集群所有槽的指派信息
-clusterState结构中记录了所有的当前处理节点信息，加快检索槽的处理节点。每个节点都会记录一个clusterState结构
+clusterState结构中记录了所有的当前处理节点信息，加快检索槽的处理节点，而clusterNode.slots值记录槽是否被自己处理
 ```c
 struct struct clusterState {
     //...
@@ -994,8 +1013,13 @@ struct struct clusterState {
 }clusterState;
 ```
 
+clusterState.slot：判断槽i由哪个节点处理，引导用户跳至指定节点
+
+clusterNode.slot：记录当前节点处理槽信息，若不记录该值，则每次向其他发送当前节点槽指派信息时，需要遍历clusterState.slot来组装节点处理槽信息，然后分发出去。若记录了可以发出该值，告知其他节点
+
 #### 17.2.4 cluster addslots命令
-cluster addslots <slot> [<slot>...]
+
+cluster addslots <slot> [<slot>...]  将指定槽分配该执行命令的节点
 命令实现
 
 1. 遍历查询所有的输入槽，判断是否已分派给其他节点处理
@@ -1015,7 +1039,19 @@ redis-cli -p 8001 #单机模式连接
 
 节点数据库的实现：集群模式下节点只能使用0号数据库，单机模式可以使用其他数据库
 
+```c
+typedef struct clusterState {
+// 记录槽与键的对应关系。跳表score对应槽，value对应键key，不保存值value
+// 可通过返回查询查找出指定槽的元素
+zskiplist *slots_to_keys;
+// ...
+} clusterState;
+CLUSTER GETKEYSINSLOT <slot> <count> // 返回槽下指定个数的键值
+```
+
 ### 17.4 重新分片
+
+cluster node 查看集群节点状态
 
 redis集群可以将任意分派的槽重新分给新的节点，其相关的键值也会移到目标节点
 
@@ -1042,22 +1078,22 @@ ASKING 命令识别为在给定的目标节点执行一次命令，随后返回�
 cluster replicate <node_id> #将当前节点设为从节点，复制<node_id>节点。若当前节点为主主节点且有处理的槽则不能执行复制命令
 
 #### 17.6.2 故障检测
-集群中每个节点都会想其他节点发送ping命令，如果在指定时间内没有返回，则标记该节点为疑似下线
+集群中每个节点都会向其他节点发送ping命令，如果在指定时间内没有返回，则标记该节点为疑似下线，向集群内发送疑似下线消息（PFAIL）
 
-若存在半数以上的节点都标记某节点为疑似下线，那么将该节点标记为已下线，并在集群中发送一条该节点已下线的广播消息
+收到疑似下线消息的节点，会将自己的clusterState.node中标记目标节点为疑似下线。若存在半数以上的节点都标记某节点为疑似下线，那么将该节点标记为已下线，并在集群中发送一条该节点已下线的广播消息（FAIL）
 
 #### 17.6.3 故障转移
 当一个从节点发现自己的主节点已下线时，开始进行故障转移
-1. 从主节点下的所有从节点中选出一个
+1. 从主节点下的所有从节点中选出一个（投票选举）
 2. 对选出的从节点执行slave no one，设置为主节点
 3. 新节点会撤销原主节点的槽指派，并将这些槽指向自己
 4. 向集群中发送一条PONG广播消息，表示自己已成为新的主节点，且该主节点已经接管了原主节点的槽
 5. 新主节点开始处理自己负责的槽命令，故障转移完成
 
 #### 17.6.4 新主节点的选举
-和sentinel选举类似
+和sentinel选举类似，基于raft算法
 
-由发现主节点下线的从节点发起拉票，向集群中发送投票的广播消息，呼吁其他主节点给自己投票，集群中每个主节点都只有一票，先到先到，超过半数得票则选举成功
+由发现主节点下线的从节点发起拉票，向集群中发送投票的广播消息，呼吁其他主节点给自己投票，集群中每个上线主节点都只有一票，先到先到，超过半数得票则选举成功，若不存在超过半数得票的则进行下一轮投票。集群中通过一个配置纪元来表示一个投票周期，通过自增计数器记录（默认0），若失败则进入下一个配置纪元
 
 ### 17.7 消息
 
@@ -1077,13 +1113,11 @@ Gossip协议由MEET、PING、PONG三种消息实现
 
 FAIL消息实现：当主节点A标记主节点B已下线时，A向集群广播一条B的FAIL消息，接收到该消息的节点都会标记节点B已下线
 
-PUBLISHL消息实现：没收到PUBLISH命令的节点不仅向channel频道发送message 消息，还会向集群广播一条publish消息。所有接收到publish消息的节点都会向channel频道发送message消息。
+PUBLISHL消息实现：接收到客户端PUBLISH命令的节点不仅向channel频道发送message 消息，还会向集群广播一条PUBLISH消息。所有接收到PUBLISH消息的节点都会向channel频道发送message消息。
 
 ### 重点
 
-节点没收到命令，若处理的键所在的槽不是由自己负责的话，向客户端返回一个MOVED错误
-
-
+节点接收到命令，若处理的键所在的槽不是由自己负责的话，向客户端返回一个MOVED错误
 
 ## 第18章 发布与订阅
 
@@ -1095,7 +1129,7 @@ PUBLISHL消息实现：没收到PUBLISH命令的节点不仅向channel频道发�
 
 publist通过访问pubsub_channels字典来向频道的所有订阅者发送消息，通过pubsub_patterns链表来向所有匹配频道的模式的订阅者发送消息
 
-
+优点类似于消息的订阅消费，但是又和redis内存消息Stream实现不一样
 
 ## 第19章 事务
 
@@ -1222,3 +1256,4 @@ slowlog get 获取慢查询日志
 ## 其他
 ### 指令
 - OBJECT ENCODING [key]  //查看键值对象的类型
+

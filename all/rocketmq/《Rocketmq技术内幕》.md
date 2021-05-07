@@ -75,7 +75,7 @@ RokcetMq有两种情况出发路由删除
 
 #### 2.3.4 路由发现
 
-RocketMQ发现路由不是实时的，当NameServer路由发生改变时，并不会通知客户端，而是通过客户端主动定时拉取最新配置来感知变化的。在发送消息时也会获取路由信息
+RocketMQ发现路由不是实时的，当NameServer路由发生改变时，并不会通知客户端，而是通过客户端主动定时拉取最新配置来感知变化的（没有定时周期，暂未找到定时拉取的代码）。在发送消息时也会获取路由信息
 
 > 本章疑问： NameServer通过当broker无心跳超过120s才更新路由信息，当Broker失效之后且在移除废弃路由之前，producer请求获取到broker信息，此时就会发送失败，producer如何保证高可用？答:producer自带失败重试机制,下次重试会绕过上次失败的broker发送.另还有故障延时机制,对出现故障的broker临时标为不可用
 >
@@ -361,7 +361,7 @@ ConsumeQueue类对应一个topic下一个队列，ConsumeQueue类中存在所有
 
 **Index条目列表**：默认一个索引文件2000万个条目，每个条目信息如下
 
-1. hashcode: key的hashcode
+1. hashcode: key的hashcode。每个key为{topic}#{key}
 2. phyoffset：消息对应的物理偏移量
 3. timediff：该消息存储与第一条消息存储的时间差
 4. preIndexNo：该槽中该条目前一条index索引，不存在则为0。hash冲突链式扩展
@@ -810,6 +810,65 @@ if (null == findBrokerResult) {
         this.mQClientFactory.findBrokerAddressInSubscribe(mq.getBrokerName(),
             this.recalculatePullFromWhichNode(mq), false);
 }
+```
+
+step6. 拉取到消息的后调（仅展示拉取成功的情况），先把消息保存到processQuque中，再提交任务到消费者线程池
+
+```java
+PullCallback pullCallback = new PullCallback() {
+            @Override
+            public void onSuccess(PullResult pullResult) {
+                if (pullResult != null) {
+                    pullResult = DefaultMQPushConsumerImpl.this.pullAPIWrapper.processPullResult(pullRequest.getMessageQueue(), pullResult,
+                        subscriptionData);
+
+                    switch (pullResult.getPullStatus()) {
+                        case FOUND:
+                            long prevRequestOffset = pullRequest.getNextOffset();
+                            pullRequest.setNextOffset(pullResult.getNextBeginOffset());
+                            long pullRT = System.currentTimeMillis() - beginTimestamp;
+                            DefaultMQPushConsumerImpl.this.getConsumerStatsManager().incPullRT(pullRequest.getConsumerGroup(),
+                                pullRequest.getMessageQueue().getTopic(), pullRT);
+
+                            long firstMsgOffset = Long.MAX_VALUE;
+                            if (pullResult.getMsgFoundList() == null || pullResult.getMsgFoundList().isEmpty()) {
+                                DefaultMQPushConsumerImpl.this.executePullRequestImmediately(pullRequest);
+                            } else {
+                                firstMsgOffset = pullResult.getMsgFoundList().get(0).getQueueOffset();
+
+                                DefaultMQPushConsumerImpl.this.getConsumerStatsManager().incPullTPS(pullRequest.getConsumerGroup(),
+                                    pullRequest.getMessageQueue().getTopic(), pullResult.getMsgFoundList().size());
+
+                                // 将消息保存到processQueue中
+                                boolean dispatchToConsume = processQueue.putMessage(pullResult.getMsgFoundList());
+                                // 构造消费请求，防止consumeMessageService线程池中
+                                DefaultMQPushConsumerImpl.this.consumeMessageService.submitConsumeRequest(
+                                    pullResult.getMsgFoundList(),
+                                    processQueue,
+                                    pullRequest.getMessageQueue(),
+                                    dispatchToConsume);
+
+                                // pullInterval，默认拉取成功后立即开启下一次拉取
+                                if (DefaultMQPushConsumerImpl.this.defaultMQPushConsumer.getPullInterval() > 0) {
+                                    DefaultMQPushConsumerImpl.this.executePullRequestLater(pullRequest,
+                                        DefaultMQPushConsumerImpl.this.defaultMQPushConsumer.getPullInterval());
+                                } else {
+                                    DefaultMQPushConsumerImpl.this.executePullRequestImmediately(pullRequest);
+                                }
+                            }
+
+                            if (pullResult.getNextBeginOffset() < prevRequestOffset
+                                || firstMsgOffset < prevRequestOffset) {
+                                log.warn(
+                                    "[BUG] pull message result maybe data wrong, nextBeginOffset: {} firstMsgOffset: {} prevRequestOffset: {}",
+                                    pullResult.getNextBeginOffset(),
+                                    firstMsgOffset,
+                                    prevRequestOffset);
+                            }
+
+                            break;
+                    }
+                }
 ```
 
 上述步骤完成后，通过MQClientFactory.getMQClientAPIImpl().pullMessage() 异步拉取消息

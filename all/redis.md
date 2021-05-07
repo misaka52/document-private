@@ -100,37 +100,59 @@ redis使用的内存分配器，在编译时指定。可以是libc、jemalloc或
 
 redis是key-value型数据库，每个键值对都会有一个dictEntry
 
-> distEntry
->
-> - key: 键。只有字符串类型
-> - value：值。有字符串、列表、哈希、集合、有序集合五种类型
-> - dictEntry* next：下一节点
->
-> key和value都是redisObject类型
->
-> RedisObject
->
-> - type：类型，4位
-> - encoding:4 :编码，4位
-> - ptr：指向实现数据结构的指针。8字节
-> - int refcount：引用数量。4字节
-> - unsigned lru:24 ：记录键值最后一次被访问的时间，24位
->
-> 一个redisObject大小为=4bit+4bit+24bit+4byte+8byte=16byte
+```c
+struct sdshdr {
+    unsigned int len;
+    unsigned int free;
+  	// 1字节
+    char buf[];
+};
+typedef struct redisObject {
+  	// 对象类型，4位
+    unsigned type:4;
+  	// 对象编码，4位
+    unsigned encoding:4;
+  	// 记录键最后一次被访问的时间，24位
+    unsigned lru:REDIS_LRU_BITS; /* lru time (relative to server.lruclock) */
+  	// 引用数量，4字节
+    int refcount;
+  	// 数据指针，8字节
+    void *ptr;
+} robj;
+typedef struct dictEntry {
+  	// sds字符串类型，8字节
+    void *key;
+  	// redisObject类型，8字节
+    union {
+        void *val;
+        uint64_t u64;
+        int64_t s64;
+        double d;
+    } v;
+  	// 下一对象指正，8字节
+    struct dictEntry *next;
+} dictEntry;
+```
 
 内存模型
 
 >  info mermory // 查看内存模型
 >
->   type ${key}// 查看key的value类型
+>  type ${key}// 查看key的value类型
 >
-> object encoding ${key} // 查看value的编码
+>  object encoding ${key} // 查看value的编码
+>
+>  memory usage ${key} // 查看key占用内存
+>
+>  redis-cli -h {hostname} -p {port} --bigkeys  // 查看redis大键值对
+>
+>  Debug object key // 可以查看键值序列化后的长度，改长度并非在redis中的长度，经过序列化压缩过了
 
 #### 查看引用数量
 
  object refcount {key} // 查看key的引用数量
 
-> int、string对象不共享
+对象共享时共享redisObject结构，当开始lru淘汰策略时，对象共享池无效。因为lru保存在redisObject中，而开启maxmemory和lru淘汰策略，则表示内存满时淘汰最近最少使用的key，因此对象无法共享
 
 #### 查看lru时间
 
@@ -401,7 +423,8 @@ sentinel（哨兵）进程监控主服务器的状态，若主服务器发生故
 
 1. 选举客观下线后的主服务器其中的一台从服务器，升级为主服务器，并让失效的主服务器改为从服务器复制新的主服务器
 2. 当客户端连接主服务器时，若失败会返回给客户端新主服务器的地址
-3. 服务器切换之后，主从服务器和哨兵的配置文件redis.conf都改变。主从服务器改变复制对象，哨兵改变监控目标
+3. 服务器切换之后，主从服务器和哨兵的配置文件redis.conf都改变。从服务器改变复制对象，哨兵改变监控目标
+4. 哨兵通过定时探测原主服务器是否恢复，恢复后通知其修改配置文件，让他复制新主节点
 
 #### 3.3 Redis配置
 
@@ -410,10 +433,103 @@ sentinel（哨兵）进程监控主服务器的状态，若主服务器发生故
 ```conf
 # 监控主服务器。quorum表示满足客观下线的最小的sentinel个数
 sentinel monitor <master-name> <ip> <port> <quorum>
-
-# 开启哨兵
-redis-server sentinel.conf --sentinel
+# 当发送主从切换后，其他slave节点切换同步新主节点的并发量，当slave节点切换时不能提供服务，读取阻塞或读取失败。
+# 比如配置1，表示允许一个slave同时切换同步新主节点
+sentinel parallel-syncs <master-name> 1  
+# 表示master节点若失联超过5s，则选择一次选举，进行主从切换
+sentinel down-after-milliseconds <master-name> 5000
+# 故障转移超时时间。若一个sentinel投保给另一个sentinel进行故障转移，该sentine将尝试在2*failover-timeout后再对它进行故障转移，若上次选举失败的话
+sentinel failover-timeout <master-name> 15000
+# 哨兵节点id，每个节点唯一，若该值不存在节点启动时自动生成。若直接赋值配置文件，导致myid一直会哨兵节点不生效
+sentinel myid cfd922fc640cec0e30ecd57847e4783a27de1ca2
 ```
+
+开启哨兵
+
+```sh
+# 方式1
+redis-server sentinel.conf --sentinel
+# 方式2
+redis-sentinel sentinel.conf
+# 连接哨兵
+➜  ~ redis-cli -p 26380
+# 查看哨兵信息
+127.0.0.1:26380> info sentinel
+sentinel_masters:1
+sentinel_tilt:0
+sentinel_running_scripts:0
+sentinel_scripts_queue_length:0
+sentinel_simulate_failure_flags:0
+master0:name=mymaster,status=ok,address=127.0.0.1:8051,slaves=2,sentinels=3
+```
+
+#### 3.4 springboot配置
+
+```yml
+spring:
+	redis:
+    # redis节点信息，哨兵模式下不用配置
+#    port: 8051
+#    host: 127.0.0.1
+    sentinel:
+      # 哨兵节点
+      nodes: 127.0.0.1:26379,127.0.0.1:26380,127.0.0.1:26381
+      # master节点名，在配置文件中配置
+      master: mymaster
+    # redis连接超时时间，单位ms
+    timeout: 10000
+```
+
+项目在初始时或链接目标节点失败时，才会想哨兵节点获取主节点地址信息。若获取完成缓存在本地项目中，此时即使哨兵节点挂了也没事
+
+#### 3.5 读写分离
+
+https://blog.csdn.net/lp19861126/article/details/109633603
+
+replica-read-only yes # 表示从节点是否允许写，默认不能允许。若为true，从节点写完也不会同步到其他节点
+
+**配置多个数据源，分为读写节点**
+
+**配置多**
+
+可以配置多个数据源，然后生成多个RedisTemplate。这样不灵活，可能发生主从切换
+
+**springboot配置优先读slave**
+
+```java
+@Configuration
+@Component
+@Slf4j
+public class RedisConfig {
+    
+    @Bean
+    public LettuceConnectionFactory redisConnectionFactory() {
+        RedisSentinelConfiguration redisSentinelConfiguration = new RedisSentinelConfiguration()
+                .master("mymaster")
+                .sentinel("127.0.0.1", 26379)
+                .sentinel("127.0.0.1", 26380)
+                .sentinel("127.0.0.1", 26381);
+        // 方法一：默认的配置，但存在问题，每次都选择第一个连接
+//        LettuceClientConfiguration lettuceClientConfiguration = LettucePoolingClientConfiguration.builder()
+//                .readFrom(ReadFrom.REPLICA_PREFERRED).build();
+        // 方法二：自定义，优先从slave节点中获取，代码后续从list随机取值以达到负载均衡
+        LettuceClientConfiguration lettuceClientConfiguration = LettucePoolingClientConfiguration.builder().readFrom(new ReadFrom() {
+            @Override
+            public List<RedisNodeDescription> select(Nodes nodes) {
+                List<RedisNodeDescription> slaveNodes = nodes.getNodes().stream()
+                        .filter(node -> node.getRole() == RedisInstance.Role.SLAVE)
+                        .collect(Collectors.toList());
+                return slaveNodes;
+//                return Collections.singletonList(nodes.getNodes());
+            }
+        }).commandTimeout(Duration.ofMillis(10000))
+                .build();
+        return new LettuceConnectionFactory(redisSentinelConfiguration, lettuceClientConfiguration);
+    }
+}
+```
+
+问题：为什么lettuce要做配置，对于从节点优先读却每次都使用同一个连接，不做负载均衡，缓存问题？有空深入研究下。。
 
 ### 4. Redis集群
 
@@ -1259,7 +1375,15 @@ public enum ReturnType {
 }
 ```
 
+### 14. scan
 
+scan cursor [MATCH pattern] [COUNT count] [Type type]
+
+用于扫描游标的方式获得匹配元素，默认只返回10条
+
+scan通过游标扫描元素，可能返回重复元素
+
+count默认10，可理解为游标获取数量，获取之后再经过match匹配一下。所以最终获取的数量可能比count少
 
 ## 四、面试题
 
@@ -1319,12 +1443,33 @@ public enum ReturnType {
 
 17. 集群的槽数为何是16384
 
-    1. 使用CRC算法最多分配2^16=65536个槽，使用bitmap压缩后为8K，而16384个槽足以，只有2K，节点发送ping消息时会发送槽信息，此时越小越好
-    2. 坐着建议redis集群最好不超过1000个节点，16384个槽足以
+    1. 使用CRC算法最多分配2^16=65536个槽，使用bitmap压缩后为8K，而16384个槽足以，只有2K（16384/8），节点发送ping消息时会发送槽信息，此时越小越好
+    2. 作者建议redis集群最好不超过1000个节点，16384个槽足以
     3. 槽位越小，节点数少的情况下，压缩率低。redis的哈希槽通过bitmap来保存，传输过程中会进行压缩，若bit的填充率slot/N越高的话，压缩率就越低。所以设置低一点，提高压缩率
 
 18. 脑裂问题
 
     1. 主从模式下，因网络问题导致主从机器分为两部分，没有master节点的异步会选择将一个slave节点升级为主节点，此后进群中存在新旧两个master节点写，当网络问题解决后，原master变更slave复制新master节点，期间原节点新增的数据直接丢失
     2. 解决方案：可以配置参数min-slaves-to-write 表示主节点至少需要几个从节点，min-slaves-max-lag(单位秒)表示从节点与主节点的最大延迟时间，当满足这两个条件时才能写入，否则拒绝写入
+    
+19. Redis阻塞问题
+
+    1. 内部原因
+       1. fork创建子进程阻塞。在进行rdb或aof持久化时fork一个子进程进行异步持久化，在rdb和aop持久化时会fork一个子进程进行后台异步持久化，fork可能响应较慢，导致阻塞，可通过info stats来查看lastest_fork_usec来查看上一次fork耗时，若查过1s则表示需要优化；
+       2. aof刷盘过慢阻塞。若进aof持久化时配置默认每秒持久化一次，当进行fsync操作若发现距离上次成功执行超过2s，则本次fsync会阻塞主线程，直至fsync操作完成
+       3. cpu饱和
+    2. 外部原因
+       1. 不合理对象和数据结构。
+          1. 使用大对象。可以将大对象拆分成小对象，通过redis-cli -h{ip} -p{port} bigkeys 查看大对象大小
+          2. 使用keys通配查询，会阻塞主线程，可以使用scan扫描来代替keys匹配，scan执行只会返回少量元素
+          3. 大量key同时过期。若在同一秒超过总键值对的25%的key同时过期，则过期清理操作会阻塞主线程
+       2. 网络问题。redis连接拒绝（达到最大连接）、网络延迟、网络软中断（存在于网络高流量吞吐的场景）
+       3. 内存交换。当redis未配置最大限定内存时，redis内存总量超过机器可用内存，则通过内存交换的方式使用机器虚拟内存代替使用
+
+20. 分布式锁问题
+
+    1. 最终一定要释放锁，在finally中执行
+    2. 任务A删除B持有的锁。可以设置不同的value，对比如果value相等再删除
+    3. 锁超时了，业务还未执行完成。可通过开启一个守护线程不断延迟锁的超时时间，直到expire失败，其中Redission已封装好
+    4. 当写入到master节点后，未同步到slave节点前master宕机了。此时slave升级导致未同步的锁丢失。可采用redlock算法解决，只能保证高可用不能根治
 

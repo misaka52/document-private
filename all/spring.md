@@ -848,5 +848,7 @@ public class TestController {
 
 ## 疑问
 
-1. 动态代理。spring、springboot注入类中什么时候会使用代理，使用哪一种
+1. 动态代理。spring、springboot注入类中什么时候会使用代理，使用哪一种？
+   1. spring默认使用jdk动态代理
+   2. springboot2.0+版本默认使用cglib代理
 

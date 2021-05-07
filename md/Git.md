@@ -40,6 +40,16 @@ git是一个分布式版本控制系统。
   
   
 
+变更为Staged类似于保存到暂存区
+
+untracked->staged：add操作
+
+unmodified->modified：编辑已保存到仓库的问题
+
+modified->staged：add操作
+
+unmodified->untracked：git rm --cached
+
 #### git add
 
 跟踪文件，将文件从工作区添加至暂存区
@@ -68,11 +78,11 @@ git commit --amend		修改上一次的提交信息
 
    回滚至指定节点
 
-   --soft			仅重置git仓库内容。修改已add，待提交。
+   --soft			仅重置git仓库内容。修改已add，待commit。
 
-   --mixed		（默认选项）重置git仓库内容、暂存区。工作区已修改未提交到暂存区
+   --mixed		（默认选项）重置git仓库内容、暂存区。工作区已修改未提交，但未add
 
-   --hard		  重置git仓库内容、工作区。修改代码丢失
+   --hard		  重置git仓库内容、暂存区、工作区。修改代码丢失
 
    当回滚至之前某节点时，若想要提交至远程仓库，需git push -f 强制推送
 
