@@ -682,6 +682,8 @@ Mixed-mode inserts：指插入中有一部分的值是自增长的，有一部�
 >
 > previous-key locking则是左闭右开
 
+RC级别下只有记录锁，RR级别下存在三种锁
+
 ### 6.4.2 解决Phantom Problem（幻读问题）
 
 Phantom Problem是指在同一事务下，连续执行两次同样的sql可能导致不一样的记录行数，第二次的sql语句可能会返回之前不存在的行

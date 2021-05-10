@@ -2003,6 +2003,12 @@ Show heap histogram  查看对象占用内存信息，instance count：实例数
 >
 > [Ljava.lang.Double; 表示一维Double数组
 
+**jvisualvm**
+
+jdk自带工具，直接调用命令jvisualvm打开软件。选择文件->装入->文件格式，堆。可查看堆内对象占用大小，实时监控等
+
+![image-20210511015150492](../../image/image-20210511015150492.png)
+
 #### 2. 内存溢出和内存泄露
 
 1. 栈溢出。递归调用

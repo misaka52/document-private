@@ -112,5 +112,5 @@
     1. 动态规范，O(n^2)
     2. 贪心，O(nlogn)
 
-13. 
+13. ？最长递增子序列。https://www.nowcoder.com/practice/9cf027bf54714ad889d4f30ff0ae5481?tpId=117&tab=answerKey
 
