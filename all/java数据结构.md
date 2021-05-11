@@ -446,6 +446,20 @@ private void remove(ThreadLocal<?> key) {
       3. set：当发生hash重入往后寻找空节点时，若发现空key节点，可清理并替换。若找到新空节点，新增节点再清理部分废弃节点
 3. 完美散列：ThreadLocal类中存在一个静态变量nextHashCode，每次增长0x61c88647（黄金分割数，(根号5-1)*2^32，有符号位，再取正），每生成一个ThreadLocal增长一次，产生完美散列不会冲突（即使是一边扩容一边计算），以此减少hash冲突
 
+#### 使用场景
+
+**1.参数隐式传递**
+
+通过ThreadLocal保存一些参数传递，比如事务提交后是否删除缓存
+
+**2. 存储登录信息**
+
+用户信息一般会保存在session或token中，而session的获取需要在接口入参中加入HttpServletRequest对象才能获取，而对于业务方法获取登录信息很频繁，但并不是所有方法都能传递HttpServletRequest对象，此时登录信息可保存在ThreadLocal中
+
+**3.解决线程安全问题**
+
+ThreadLocal线程线程，可以存在一些非线程安全的常用类，比如Random、SimpleDateFormat
+
 ## JUC
 
 ### LongAdder
