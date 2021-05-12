@@ -208,3 +208,157 @@ Stream<List<Integer>> stream = Stream.of(
         stream.flatMap(a -> a.stream()).forEach(System.out::println);
 ```
 
+## NIO
+
+### ByteBuffer
+
+负责存储数据，处理数据
+
+**属性**
+
+- capacity：缓存容量，初始化时分配
+- limit：缓存区中数据总数，limit后数据不能进行读写
+- position：读或写操作的元素位置
+
+**方法**
+
+- put：往缓存中添加元素
+- flip：切换为读模式
+- get(byte[])：读取元素
+
+```java
+// 1、分配内存
+        ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
+        print(byteBuffer);
+        String str = "ysc";
+        // 2、往缓冲中添加元素
+        byteBuffer.put(str.getBytes());
+        print(byteBuffer);
+        // 3、开启读模式。从position读到limit，position随着读取指针移动
+        byteBuffer.flip();
+        print(byteBuffer);
+        byte[] bytes = new byte[byteBuffer.limit()];
+        byteBuffer.get(bytes);
+        System.out.println(new String(bytes));
+        print(byteBuffer);
+        // 4、清理缓存，切换回写模式
+        byteBuffer.clear();
+        print(byteBuffer);
+
+// 输出
+mark:java.nio.HeapByteBuffer[pos=0 lim=1024 cap=1024]
+mark:java.nio.HeapByteBuffer[pos=3 lim=1024 cap=1024]
+mark:java.nio.HeapByteBuffer[pos=0 lim=3 cap=1024]
+ysc
+mark:java.nio.HeapByteBuffer[pos=3 lim=3 cap=1024]
+mark:java.nio.HeapByteBuffer[pos=0 lim=1024 cap=1024]
+```
+
+### FileChannel
+
+通道，负责传输数据
+
+### IO模型
+
+https://zhuanlan.zhihu.com/p/115912936
+
+**文件描述符**：linux内核对所有的外围设备都当成一个文件来处理，并返回一个file descriptor（fd，文件描述符）。而socket也有像一个的描述符socket fd，描述符是一个数组，指向linux内核中的一个结构体
+
+**IO运行过程**：当应用程序调用read方法时，次数系统会先等待数据准备，先将数据从网卡中拷贝到内核，再从内核中拷贝到进程中（将内核空间数据拷贝到用户空间）。写操作相反
+
+**应用程序键数据发送**
+
+以两个应用进程通讯为例，A向B发送一条消息
+
+1. 应用A将消息发送TCP缓冲区
+2. TCP将缓冲区的消息发送出去，B服务接收并保存到TCP接收缓冲区中
+3. B将数据从TCP缓冲区读到自己的用户空间中
+
+**应用通过调用recvfrom读取数据**
+
+#### 阻塞IO
+
+阻塞咨询数据是否准备完毕，是否复制完成
+
+1. 应用进程向内核发起recvfrom读取数据
+2. 准备数据报（应用进程阻塞）
+3. 将数据从内核空间拷贝到用户空间
+4. 复制完成后，返回成功提示
+
+#### 非阻塞IO
+
+循环数据是否准备完毕，准备完毕后进行数据复制
+
+1. 应用进程向内核发起recvfrom读取数据
+2. 当数据未准备好时，返回EWOULDBLOCK错误
+3. 应用进程再次（多次循环咨询）发起recvfrom读取数据
+4. 当数据包准备好时，进行数据复制
+5. 将数据从内核空间拷贝到用户空间
+6. 复制完成后，返回成功提示
+
+#### IO多路复用模型
+
+采用轮询的方式，调用select/poll/epoll/pselect其中一个函数监听传入多个文件描述符，判断是否存在fd准备就绪，当准备就绪进行处理，否则阻塞等待
+
+多路复用适用于高并发处理海量连接，在连接数小于1000时，并没有明显的性能优势
+
+##### select
+
+多路复用程序通过select/poll/epoll/pselect来管理客户端连接。比如select，对某些时间监听（连接、读、写），不停的轮询，当select()返回大于0表示存在新事件则处理，否则阻塞等待
+
+```c
+interface ChannelHandler{
+      void channelReadable(Channel channel);
+      void channelWritable(Channel channel);
+   }
+   class Channel{
+     Socket socket;
+     Event event;//读，写或者连接
+   }
+
+   //IO线程主循环:
+   class IoThread extends Thread{
+   public void run(){
+   Channel channel;
+   while(channel=Selector.select()){//选择就绪的事件和对应的连接
+      if(channel.event==accept){
+         registerNewChannelHandler(channel);//如果是新连接，则注册一个新的读写处理器
+      }
+      if(channel.event==write){
+         getChannelHandler(channel).channelWritable(channel);//如果可以写，则执行写事件
+      }
+      if(channel.event==read){
+          getChannelHandler(channel).channelReadable(channel);//如果可以读，则执行读事件
+      }
+    }
+   }
+   Map<Channel，ChannelHandler> handlerMap;//所有channel的对应事件处理器
+  }
+```
+
+#### 信号驱动IO模型
+
+IO复用模型通过select监听多个fd，但是通过轮询的方式查询的，可能产生多余的轮询操作。
+
+信号驱动IO模型通过建立信号关联的方式，在发出请求后等待数据的就绪通知即可，避免大量无效轮询操作
+
+1. 系统调用sigaction，建立sigio信号处理程序，内核返回成功
+2. 内核数据准备完毕发送信号通知应用，应用发送recvfrom命令，请求数据复制
+3. 数据复制完成，操作完成
+
+#### 异步IO模型
+
+IO复用模型依赖select询问和recvfrom请求拷贝数据两步完成整个操作（信号驱动依赖于信号建立+recvfrom）。异步IO模型整合成一步，只需向内核发送read操作
+
+1. 应用向内核发送read请求，直接结束
+2. 内核收到请求后建立一个信号联系，在数据准备就绪后主动将数据复制到用户空间
+3. 等待所有数据拷贝完成，内核发送信号通知应用操作完成
+
+#### 概念
+
+同步阻塞、同步不阻塞：对于同步操作阻塞（阻塞IO、多路复用在无fd准备就绪时阻塞）或不阻塞（非阻塞IO）
+
+异步不阻塞：信号驱动IO模型、异步IO模型
+
+
+
