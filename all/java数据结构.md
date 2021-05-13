@@ -3121,27 +3121,107 @@ public E take() throws InterruptedException {
 
 ```
 ctl是一个原子变量，前3位表示线程池状态runState（简称rs），后29位表示当前有效的线程数workerCount（简称wc），即worker的数量
-runState装填
-1. RUNNING，可以新增线程，同时处理queue的任务。值111
-2. SHUTDOWN，不可以新增线程，但是处理queue的任务。值000
-3. STOP，不可以新增线程，同时不处理queue的任务。值001
-4. TIDYING，所有线程的终止了，同时workerCount为0，中间态，最后会转化为TERIMINATED。值010
-5. terminated()方法结束，状态变为TERIMINATED。值011
+runState状态
+1. RUNNING，可以新增线程，同时处理queue的任务。值前三位为111，其他为0
+2. SHUTDOWN，不可以新增线程，但是处理queue的任务。值0
+3. STOP，不可以新增线程，同时不处理queue的任务。前三位为001，其他为0
+4. TIDYING，所有线程的终止了，同时workerCount为0，中间态，最后会转化为TERIMINATED，目前该状态和TERIMINATED之间无实现流程。前三位为010，其他为0
+5. terminated()方法结束，状态变为TERIMINATED。前三位为011，其他为0
 ```
 
 - corePoolSize：核心线程数量
-
 - maximumPoolSize：最大线程数量
-
 - keepAliveTime：worker最长闲置时间，超过改时间worker过期被清理。核心线程默认永不过期，allowCoreThreadTimeOut控制，默认false
-
 - workQueue：任务队列，阻塞队列，BlockingQueue
-
 - threadFactory：线程工厂
-
 - RejectedExecutionHandler：拒绝策略。默认拒绝任务，抛出异常
-
 - Worker：线程池任务类，可持有一个任务运行
+
+#### LinkedBlockingQueue
+
+```java
+/** Lock held by take, poll, etc */
+    private final ReentrantLock takeLock = new ReentrantLock();
+
+    /** Wait queue for waiting takes */
+		// 当队列为空时，获取该condition并阻塞当前线程，不能获取元素
+    private final Condition notEmpty = takeLock.newCondition();
+
+    /** Lock held by put, offer, etc */
+    private final ReentrantLock putLock = new ReentrantLock();
+
+    /** Wait queue for waiting puts */
+		// 当队列满时，获取该condition并阻塞当前线程，不能添加元素
+    private final Condition notFull = putLock.newCondition();
+```
+
+
+
+```java
+// 往阻塞队列中添加元素，满了直接返回false
+public boolean offer(E e) {
+  			// 不能添加空任务
+        if (e == null) throw new NullPointerException();
+        final AtomicInteger count = this.count;
+  			// 容量满了不能添加
+        if (count.get() == capacity)
+            return false;
+        int c = -1;
+        Node<E> node = new Node<E>(e);
+        final ReentrantLock putLock = this.putLock;
+        putLock.lock();
+        try {
+            if (count.get() < capacity) {
+                enqueue(node);
+                c = count.getAndIncrement();
+                if (c + 1 < capacity)
+                    notFull.signal();
+            }
+        } finally {
+            putLock.unlock();
+        }
+        if (c == 0)
+          	// 唤醒因队列没有元素时阻塞的线程
+            signalNotEmpty();
+        return c >= 0;
+    }
+
+// 阻塞获取元素
+public E take() throws InterruptedException {
+        E x;
+        int c = -1;
+        final AtomicInteger count = this.count;
+        final ReentrantLock takeLock = this.takeLock;
+  			// 添加元素获取锁
+        takeLock.lockInterruptibly();
+        try {
+          	// 队列为空则阻塞，等待添加元素后唤醒
+            while (count.get() == 0) {
+                notEmpty.await();
+            }
+            x = dequeue();
+          	// 返回减法前的值，即原队列元素数量
+            c = count.getAndDecrement();
+            if (c > 1)
+                notEmpty.signal();
+        } finally {
+            takeLock.unlock();
+        }
+  			// 当队列数满时，获取一个元素，需唤醒notFull阻塞的线程
+        if (c == capacity)
+            signalNotFull();
+        return x;
+    }
+private void signalNotFull() {
+        final ReentrantLock putLock = this.putLock;
+        putLock.lock();
+        try {
+            notFull.signal();
+        } finally {
+            putLock.unlock();
+        }
+    }
+```
 
 #### addWorker
 
@@ -3165,6 +3245,7 @@ private boolean addWorker(Runnable firstTask, boolean core) {
           	// CAS增加wc
             for (;;) {
                 int wc = workerCountOf(c);
+              	// CAPACITY=2^29-1表示线程池最大容量
                 if (wc >= CAPACITY ||
                     wc >= (core ? corePoolSize : maximumPoolSize))
                     return false;

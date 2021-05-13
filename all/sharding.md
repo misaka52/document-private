@@ -207,3 +207,28 @@ select * from table limit 0, {a+b}
 - 不支持存储过程、函数、游标操作
 - 不支持savepoint
 - 不支持多结果的语句（即存储过程，非select多条数据）
+
+### 分片策略
+
+##### 分片算法
+
+**标准分片算法PreciseShardingAlgorithm**：用于处理单一键作为分片键的=和in操作处理，需配合StandardShardingStrategy
+
+**范围分片算法RangeShardingAlogrithm**：用于处理单一键作为分片键的between and操作，需配合StandardShardingStrategy
+
+**复合分片算法ComplexShardingAlogrithm**：用于处理多个键复合规则操作，用户自定义实现。需配合ComplexShardingStrategy
+
+**Hint分片算法HintShardingAlogrithm**：Hint指的是对于分片字段非SQL决定，通过SQL hint灵活注入字段
+
+##### 分片策略
+
+**标准分片策略**
+
+**复合分片策略**
+
+**行表达式分片策略InlineShardingStrategy**：使用grovy表示，对sql的=和in操作支持，只支持单分片键。对于简单的算法，可配置表达式，user_{orderId % 8}
+
+**Hint分片策略HintShardingStrategy**：通过Hint而非sql方式分片的策略
+
+**不分片策略NoneShardingStrategy**：不进行分片，全表路由
+
