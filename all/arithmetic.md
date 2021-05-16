@@ -101,7 +101,7 @@
 
 8. 一个环上有10个点,编号为0-9,从0点出发,每步可以顺时针到下一个点,也可以逆时针到上一个点,求:经过n步又回到0点有多少种不同的走法
 
-9. 求一个环形[链表](https://www.nowcoder.com/jump/super-jump/word?word=链表)的环的长度
+9. 求一个环形[链表](https://www.nowcoder.com/jump/super-jump/word?word=链表)的环的长度？求环形链表进入的环的初始节点？
 
 10. 给你两个非空的[链表](https://www.nowcoder.com/jump/super-jump/word?word=链表)，表示两个非负的整数。它们每位数字都是按照逆序的方式存储的，并且每个节点只能存储一位数字。请你将两个数相加，并以相同形式返回一个表示和的链表
 
@@ -112,5 +112,36 @@
     1. 动态规范，O(n^2)
     2. 贪心，O(nlogn)
 
-13. ？最长递增子序列。https://www.nowcoder.com/practice/9cf027bf54714ad889d4f30ff0ae5481?tpId=117&tab=answerKey
+13. 给定数组arr，设长度为n，输出arr的最长递增子序列。（如果有多个答案，请输出其中字典序最小的）。https://www.nowcoder.com/practice/9cf027bf54714ad889d4f30ff0ae5481?tpId=117&tab=answerKey
+
+14. 容器盛水问题。https://www.nowcoder.com/practice/31c1aed01b394f0b8b7734de0324e00f?tpId=117&tab=answerKey
+
+15. 现在有一个没有重复元素的整数集合S，求S的所有子集。注意：你给出的子集中的元素必须按升序排列，给出的解集中不能出现重复的元素https://www.nowcoder.com/practice/c333d551eb6243e0b4d92e37a06fbfc9?tpId=117&tab=answerKey
+
+16. 给定一个字符串的数组strs，请找到一种拼接顺序，使得所有的字符串拼接起来组成的字符串是所有可能性中字典序最小的，并返回这个字符串。https://www.nowcoder.com/practice/f1f6a1a1b6f6409b944f869dc8fd3381?tpId=117&tab=answerKey
+
+17. 给定一个 n * m 的矩阵 a，从左上角开始每次只能向右或者向下走，最后到达右下角的位置，路径上所有的数字累加起来就是路径和，输出所有的路径中最小的路径和。https://www.nowcoder.com/practice/7d21b6be4c6b429bb92d219341c4f8bb?tpId=117&tab=answerKey
+
+    1. 使用两层O(N)数组空间，交替使用
+
+## 算法实现
+
+### 二分法
+
+#### 1.计算第一个大于等于目标元素的节点
+
+```java
+while (l <= r) {
+  int m = (l + r) / 2;
+  if (arr[m] >= target) {
+    r = m - 1;
+  } else {
+    l = m + 1;
+  }
+}
+return l;
+// 若目标元素比数组中所有值都大，则返回初始r+1
+```
+
+将等于移到else中，可转换为求最后一个大于等于目标元素的节点
 

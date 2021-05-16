@@ -1194,7 +1194,7 @@ https://juejin.cn/post/6844903830442737671
 
 #### 12.1 redis分布式锁实现-加锁
 
-##### 12.1.1 setnx + expire实现（错误）
+##### 12.1.1 setnx + expire实现（不具有原子性）
 
 先获取锁，在通过expire设置过期时间，这样不具有原子性，可能setnx成功，expire因为指令异常或重启导致指令执行失败，key无法过期
 
@@ -1401,6 +1401,286 @@ scan cursor [MATCH pattern] [COUNT count] [Type type]
 scan通过游标扫描元素，可能返回重复元素
 
 count默认10，可理解为游标获取数量，获取之后再经过match匹配一下。所以最终获取的数量可能比count少
+
+### 15. Redission源码解析
+
+https://zhuanlan.zhihu.com/p/120847051
+
+#### lock
+
+```java
+// 业务层
+RLock lock = redisson.getLock(key);
+lock.lock();
+
+public void lock() {
+        try {
+          	// 加锁，默认不超时
+            lock(-1, null, false);
+        } catch (InterruptedException e) {
+            throw new IllegalStateException();
+        }
+    }
+// leaseTime:锁租赁时间
+private void lock(long leaseTime, TimeUnit unit, boolean interruptibly) throws InterruptedException {
+        long threadId = Thread.currentThread().getId();
+  			// 尝试加锁
+        Long ttl = tryAcquire(leaseTime, unit, threadId);
+        // lock acquired
+  			// 若ttl为空表示加锁成功，否则表示加锁失败
+        if (ttl == null) {
+            return;
+        }
+
+  			// 订阅锁信息，后续若主动释放锁，会通过消息发布通知等待获取锁的线程，继续获取锁
+        RFuture<RedissonLockEntry> future = subscribe(threadId);
+        if (interruptibly) {
+            commandExecutor.syncSubscriptionInterrupted(future);
+        } else {
+            commandExecutor.syncSubscription(future);
+        }
+
+        try {
+          	// 循环尝试获取锁
+            while (true) {
+                ttl = tryAcquire(leaseTime, unit, threadId);
+                // lock acquired
+                if (ttl == null) {
+                    break;
+                }
+
+                // waiting for message
+                if (ttl >= 0) {
+                    try {
+                      	// 尝试阻塞等待获取锁，最多阻塞ttl
+                        future.getNow().getLatch().tryAcquire(ttl, TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException e) {
+                        if (interruptibly) {
+                            throw e;
+                        }
+                        future.getNow().getLatch().tryAcquire(ttl, TimeUnit.MILLISECONDS);
+                    }
+                } else {
+                    if (interruptibly) {
+                        future.getNow().getLatch().acquire();
+                    } else {
+                        future.getNow().getLatch().acquireUninterruptibly();
+                    }
+                }
+            }
+        } finally {
+            unsubscribe(future, threadId);
+        }
+//        get(lockAsync(leaseTime, unit));
+    }
+
+private Long tryAcquire(long leaseTime, TimeUnit unit, long threadId) {
+        return get(tryAcquireAsync(leaseTime, unit, threadId));
+    }
+private <T> RFuture<Long> tryAcquireAsync(long leaseTime, TimeUnit unit, long threadId) {
+        if (leaseTime != -1) {
+          	// 设置键为不过期
+            return tryLockInnerAsync(leaseTime, unit, threadId, RedisCommands.EVAL_LONG);
+        }
+  			// 若显式设置了过期时间，则设置键值过期时间为看门狗周期(默认30s)，
+        RFuture<Long> ttlRemainingFuture = tryLockInnerAsync(commandExecutor.getConnectionManager().getCfg().getLockWatchdogTimeout(), TimeUnit.MILLISECONDS, threadId, RedisCommands.EVAL_LONG);
+        ttlRemainingFuture.onComplete((ttlRemaining, e) -> {
+            if (e != null) {
+                return;
+            }
+
+            // lock acquired
+          	// 加锁成功
+            if (ttlRemaining == null) {
+                scheduleExpirationRenewal(threadId);
+            }
+        });
+        return ttlRemainingFuture;
+    }
+// 保存键值对。key=业务键值，value=UUID:{当前线程id}，UUID在getLock时创建RedissonLock生成
+// 保存hash结构，维护重入锁数量
+// 为啥用hash结构，是为了同时保存value和对应重入数量。但值得注意的时是，过期时间只能对key设置，所以同名redisson不能同时为两个线程添加锁，否则过期时间会紊乱
+<T> RFuture<T> tryLockInnerAsync(long leaseTime, TimeUnit unit, long threadId, RedisStrictCommand<T> command) {
+        internalLockLeaseTime = unit.toMillis(leaseTime);
+
+        return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, command,
+                  "if (redis.call('exists', KEYS[1]) == 0) then " +
+                      "redis.call('hincrby', KEYS[1], ARGV[2], 1); " +
+                      "redis.call('pexpire', KEYS[1], ARGV[1]); " +
+                      "return nil; " +
+                  "end; " +
+                  "if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then " +
+                      "redis.call('hincrby', KEYS[1], ARGV[2], 1); " +
+                      "redis.call('pexpire', KEYS[1], ARGV[1]); " +
+                      "return nil; " +
+                  "end; " +
+                  "return redis.call('pttl', KEYS[1]);",
+                    Collections.<Object>singletonList(getName()), internalLockLeaseTime, getLockName(threadId));
+    }
+private void scheduleExpirationRenewal(long threadId) {
+        ExpirationEntry entry = new ExpirationEntry();
+  			// 从缓存中获取需要重新续期的键值
+        ExpirationEntry oldEntry = EXPIRATION_RENEWAL_MAP.putIfAbsent(getEntryName(), entry);
+        if (oldEntry != null) {
+            oldEntry.addThreadId(threadId);
+        } else {
+            entry.addThreadId(threadId);
+          	// 续期
+            renewExpiration();
+        }
+    }
+// 每隔1/3个周期进行续期，过期时间为一个周期。即当周期为30s时，在剩余20s进行续期，过期时间重置为30s
+private void renewExpiration() {
+        ExpirationEntry ee = EXPIRATION_RENEWAL_MAP.get(getEntryName());
+        if (ee == null) {
+            return;
+        }
+        
+        Timeout task = commandExecutor.getConnectionManager().newTimeout(new TimerTask() {
+            @Override
+            public void run(Timeout timeout) throws Exception {
+                ExpirationEntry ent = EXPIRATION_RENEWAL_MAP.get(getEntryName());
+                if (ent == null) {
+                    return;
+                }
+                Long threadId = ent.getFirstThreadId();
+                if (threadId == null) {
+                    return;
+                }
+                
+                RFuture<Boolean> future = renewExpirationAsync(threadId);
+                future.onComplete((res, e) -> {
+                    if (e != null) {
+                        log.error("Can't update lock " + getName() + " expiration", e);
+                        return;
+                    }
+                    
+                    if (res) {
+                        // reschedule itself
+                        renewExpiration();
+                    }
+                });
+            }
+        }, internalLockLeaseTime / 3, TimeUnit.MILLISECONDS);
+        
+        ee.setTimeout(task);
+    }
+// 当键值存在即续期，续期成功返回true
+protected RFuture<Boolean> renewExpirationAsync(long threadId) {
+        return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+                "if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then " +
+                    "redis.call('pexpire', KEYS[1], ARGV[1]); " +
+                    "return 1; " +
+                "end; " +
+                "return 0;",
+            Collections.<Object>singletonList(getName()), 
+            internalLockLeaseTime, getLockName(threadId));
+    }
+```
+
+#### unlock
+
+```java
+@Override
+    public void unlock() {
+        try {
+            get(unlockAsync(Thread.currentThread().getId()));
+        } catch (RedisException e) {
+            if (e.getCause() instanceof IllegalMonitorStateException) {
+                throw (IllegalMonitorStateException) e.getCause();
+            } else {
+                throw e;
+            }
+        }
+        
+//        Future<Void> future = unlockAsync();
+//        future.awaitUninterruptibly();
+//        if (future.isSuccess()) {
+//            return;
+//        }
+//        if (future.cause() instanceof IllegalMonitorStateException) {
+//            throw (IllegalMonitorStateException)future.cause();
+//        }
+//        throw commandExecutor.convertException(future);
+    }
+@Override
+    public RFuture<Void> unlockAsync(long threadId) {
+        RPromise<Void> result = new RedissonPromise<Void>();
+        RFuture<Boolean> future = unlockInnerAsync(threadId);
+
+        future.onComplete((opStatus, e) -> {
+          	// 取消续期
+            cancelExpirationRenewal(threadId);
+
+            if (e != null) {
+                result.tryFailure(e);
+                return;
+            }
+
+            if (opStatus == null) {
+                IllegalMonitorStateException cause = new IllegalMonitorStateException("attempt to unlock lock, not locked by current thread by node id: "
+                        + id + " thread-id: " + threadId);
+                result.tryFailure(cause);
+                return;
+            }
+
+            result.trySuccess(null);
+        });
+
+        return result;
+    }
+// 异步释放锁。释放锁后发送消息，通知其他订阅消息的线程
+protected RFuture<Boolean> unlockInnerAsync(long threadId) {
+        return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+                "if (redis.call('hexists', KEYS[1], ARGV[3]) == 0) then " +
+                    "return nil;" +
+                "end; " +
+                "local counter = redis.call('hincrby', KEYS[1], ARGV[3], -1); " +
+                "if (counter > 0) then " +
+                    "redis.call('pexpire', KEYS[1], ARGV[2]); " +
+                    "return 0; " +
+                "else " +
+                    "redis.call('del', KEYS[1]); " +
+                    "redis.call('publish', KEYS[2], ARGV[1]); " +
+                    "return 1; "+
+                "end; " +
+                "return nil;",
+                Arrays.<Object>asList(getName(), getChannelName()), LockPubSub.UNLOCK_MESSAGE, internalLockLeaseTime, getLockName(threadId));
+
+    }
+void cancelExpirationRenewal(Long threadId) {
+        ExpirationEntry task = EXPIRATION_RENEWAL_MAP.get(getEntryName());
+        if (task == null) {
+            return;
+        }
+        
+        if (threadId != null) {
+          	// 释放锁。键值重入锁次数减一，当减到零时移除线程
+            task.removeThreadId(threadId);
+        }
+
+        if (threadId == null || task.hasNoThreads()) {
+            Timeout timeout = task.getTimeout();
+            if (timeout != null) {
+                timeout.cancel();
+            }
+          	// 移除待续期对象
+            EXPIRATION_RENEWAL_MAP.remove(getEntryName());
+        }
+    }
+public void removeThreadId(long threadId) {
+            Integer counter = threadIds.get(threadId);
+            if (counter == null) {
+                return;
+            }
+            counter--;
+            if (counter == 0) {
+                threadIds.remove(threadId);
+            } else {
+                threadIds.put(threadId, counter);
+            }
+        }
+```
 
 ## 四、面试题
 

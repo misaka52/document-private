@@ -3123,7 +3123,7 @@ public E take() throws InterruptedException {
 ctl是一个原子变量，前3位表示线程池状态runState（简称rs），后29位表示当前有效的线程数workerCount（简称wc），即worker的数量
 runState状态
 1. RUNNING，可以新增线程，同时处理queue的任务。值前三位为111，其他为0
-2. SHUTDOWN，不可以新增线程，但是处理queue的任务。值0
+2. SHUTDOWN，不可以新增线程，但能处理queue的任务。值0
 3. STOP，不可以新增线程，同时不处理queue的任务。前三位为001，其他为0
 4. TIDYING，所有线程的终止了，同时workerCount为0，中间态，最后会转化为TERIMINATED，目前该状态和TERIMINATED之间无实现流程。前三位为010，其他为0
 5. terminated()方法结束，状态变为TERIMINATED。前三位为011，其他为0

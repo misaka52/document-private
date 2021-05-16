@@ -487,15 +487,15 @@ juit程序不能识别spring，无法创建Spring容器。可通过@RunWith注�
 
 #### 事务传播行为
 
-只两个一个事务方法A里调用另一个事务方法B，事务行为如何传播
+一个事务方法A里调用另一个事务方法B，事务行为如何传播
 
-- PROPAGATION_REQUIRED(默认)：A中有事务，使用A中的事务。若没有则B新建事务
-- PROPAGATION_SUPPORTS: A中有事务则使用A中的事务，没有则不使用事务
-- PROPAGATION_MANDATORY: A中有事务使用A中事务；没有则抛异常
-- PROPAGATION_REQUIRED_NEW：A中有事务则将A中事务挂起新建一个事务
-- PROPAGATION_NOT_SUPPORTED: A中有事务，将A中事务挂起
-- PROPAGATION_NEVEW: A中事务则抛出异常
-- PROPAGATION_NESTED: 嵌套事务，当A执行之后设置一个保存点。若B执行成功则通过，若B执行失败根据客户需求回滚到保存点或初始状态
+- PROPAGATION_REQUIRED(默认)：支持当前事务，若不当前没有事务，则新建一个事务
+- PROPAGATION_REQUIRED_NEW：新建一个事务，将外层事务挂起。当新事务失败后回滚，抛出异常，外层情况可根据异常处理选择提交或回滚事务
+- PROPAGATION_SUPPORTS: 支持当前事务，若外层无事务则以非事务方式执行
+- PROPAGATION_MANDATORY: 支持当前事务，若外层无事务则抛出异常
+- PROPAGATION_NOT_SUPPORTED: 以非事务方式执行，挂起外层事务
+- PROPAGATION_NEVER: 以非事务方式执行，若外层存在事务则抛出异常
+- PROPAGATION_NESTED: 嵌套事务，当外层事务执行之后设置一个保存点。若内层事务执行成功则通过，若执行失败根据客户需求回滚到保存点或初始状态
 
 #### Spring框架事务管理的分离
 

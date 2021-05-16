@@ -428,6 +428,7 @@ hmget key field [field ...] # 获取哈希键的多个字段
 hgetall key # 获取hash表key中所有的域和值
 hdel key field [field ...] #删除消息表key指定域
 hexists key field #查看set中键值是否存在
+hincrby key field increment # 针对hash结构键值增加，若key不存在则新建key，若field不存在则新建field，不能对非数字类型field操作
 ```
 
 ### 8.5 集合对象

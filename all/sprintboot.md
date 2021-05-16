@@ -450,3 +450,32 @@ spring内部自带注解@EnableAutoConfiguration，注解实现扫描所有jar�
 1. 启动类注解@SpringBootApplication中携带注解@EnableAutoConfiguration，具体选择器AutoConfigurationImportSelector
 2. AutoConfigurationImportSelector.getAutoConfigurationEntry -> getCandidateConfigurations() -> loadFactoryNames() -> loadSpringFactories()
 
+### 2.15 事务
+
+事务分为编程式事务和声明式事务
+
+- 编程式事务：手动管理事务，编写开启、提交、回滚事务动作
+- 声明式事务：通过配置xml或注解的方式，对需要的方法通过切换添加事务，不侵入源代码
+
+@Transactional
+
+- timeout：默认-1，单位秒。该配置表示整个事务的超时时间，mysql数据库innodb引擎只有加锁超时时间，使用时必须满足二者
+  - 在spring中，若事务超时，事务整体回滚（代码控制）
+  - 在mysql上，若事务超时，通过`innodb_rollback_on_timeout`配置判断（默认OFF），若为OFF则当前事务超时不回滚，可继续操作当前事务提交或回滚；若为ON则当前事务超时立即回滚
+  - `innodb_lock_wait_timeout`默认50（单位秒），表示加锁的超时时间，并非整个事务的超时时间
+
+https://xie.infoq.cn/article/52f38883e28821c9cf0a608ea
+
+spring在bean初始化完成后，通过BeanPostProcesser进行对象增强，增加了代理对象TransactionInterceptor，通过invoke方法调用
+
+首先通过获取当前事务，根据事务传播行为判断是否开启新事务。如开启新事务，则获取数据库连接，若连接为自动提交则手动关闭事务自动提交。调用目标方法，最终决定事务提交或回滚。当抛出异常时且异常在rollbackOn范围内则进行回滚，否则对以操作事务直接提交。全部操作完成判断连接自动提交是否需要还原
+
+事务生效条件
+
+- 必须是public方法
+  - 对于private方法，不论是jdk还是cglib代理都无法代理private方法
+  - private方法不能被外部正常（除非使用反射，一般不会这么写）调用
+- 自调用事务失效
+  - 自调用事务方法，代理对象方法通过invoke调用原对象方法，所以是通过本类直接调用内层事务方法，内层事务失效
+- 发生在rollbackFor异常外事务失效
+- 多数据源事务失效
