@@ -458,7 +458,7 @@ private void remove(ThreadLocal<?> key) {
 
 **3.解决线程安全问题**
 
-ThreadLocal线程线程，可以存在一些非线程安全的常用类，比如Random、SimpleDateFormat
+ThreadLocal线程安全，可以存在一些非线程安全的常用类，比如Random、SimpleDateFormat
 
 ## JUC
 
@@ -2383,20 +2383,80 @@ private boolean doAcquireNanos(int arg, long nanosTimeout)
 
 读写锁，分为读写和写锁。适合多读少写的场景，常见实现ReentrantReadWriteLock
 
-- 读锁：读锁之间不互斥
-- 写锁：与读锁、写锁互斥
-
 **Condition条件支持**：读锁调用newCondition()会抛出UnsupportedOperationException()，写锁可以获取condition。因为线程对读锁的访问不受限制，无法锁住对象，所以不支持condition
 
-写锁可降级为读锁，不可升级
-
-- state字段，前16位表示读锁数量，后16位表示写锁数量
+- state字段，高16位表示读锁数量，低16位表示写锁数量
 - 当等待队列表头为互斥节点时，表示当前读锁被占用；当等待表头为共享节点时，表示当前写锁被占用，当写锁释放时，会以传播形式唤醒共享节点
-- HoldCounter、ThreadLocalHoldCounter：仅保存线程读锁的重入量
-- 当等待队列中表头为互斥节点，则添加的新的读锁，只有已获取锁的线程可重入，新线程的必须排队等待
+- 当等待队列中表头为互斥节点，则添加读锁，只有已获取锁的线程可重入，新线程的必须排队等待
+
+**读锁加锁**
 
 ```java
-// threadLocal变量，保存每个线程的读锁重入量
+static final class FairSync extends Sync {
+        private static final long serialVersionUID = -2274990926593161451L;
+        final boolean writerShouldBlock() {
+            return hasQueuedPredecessors();
+        }
+        final boolean readerShouldBlock() {
+            return hasQueuedPredecessors();
+        }
+    }
+//判断等待队列中是否存在节点
+// 1、首节点是标记节点，不保存业务数据
+// 2、当首尾节点不相等时，且首节点next为null，目前只有在初始化时先设置tail节点，再设置nex指针次数为空，所以此时队列中存在数据
+// 3、当业务首节点（第二节点）不被当前线程持有时，则返回存在数据
+public final boolean hasQueuedPredecessors() {
+        // The correctness of this depends on head being initialized
+        // before tail and on head.next being accurate if the current
+        // thread is first in queue.
+        Node t = tail; // Read fields in reverse initialization order
+        Node h = head;
+        Node s;
+        return h != t &&
+            ((s = h.next) == null || s.thread != Thread.currentThread());
+    }
+
+static final class NonfairSync extends Sync {
+        private static final long serialVersionUID = -8159625535654395037L;
+        final boolean writerShouldBlock() {
+            return false; // writers can always barge
+        }
+        final boolean readerShouldBlock() final boolean apparentlyFirstQueuedIsExclusive() {
+        Node h, s;
+        return (h = head) != null &&
+            (s = h.next)  != null &&
+            !s.isShared()         &&
+            s.thread != null;
+    }{
+            /* As a heuristic to avoid indefinite writer starvation,
+             * block if the thread that momentarily appears to be head
+             * of queue, if one exists, is a waiting writer.  This is
+             * only a probabilistic effect since a new reader will not
+             * block if there is a waiting writer behind other enabled
+             * readers that have not yet drained from the queue.
+             */
+            return apparentlyFirstQueuedIsExclusive();
+        }
+    }
+```
+
+- 若当前被写锁占用且不属于当前线程，则返回加锁失败
+
+- 写锁占用时可添加重入读锁。若当前被写锁占用，可以继续添加的该线程的读锁
+  - 添加读锁时，判断是否应该读阻塞，若应该阻塞则返回只能添加已经重入线程的锁，新线程锁不可添加
+- 非公平锁-读：若等待队列中首节点为互斥节点则阻塞；公平锁-读：若等待队列中存在节点则阻塞
+
+**写锁加锁**
+
+- 读锁占据时不可添加写锁（包括可重入写锁）。若当前仅被读锁占用，或被写锁占用但不属于当前线程，则加锁失败，则作为互斥节点添加到等待队列
+- 非公平锁：写不阻塞，非公平锁：若等待队列中存在节点则阻塞
+
+```java
+// 共享读模式下第一个读线程。当第一个读线程释放锁之后，该字段一直为空，直至整个进入下一轮读锁获取
+private transient Thread firstReader = null;
+// 共享读模式下第一个读线程的锁重入数
+private transient int firstReaderHoldCount;
+// threadLocal变量，保存每个线程的读锁重入量，不包括第一个读线程的数量
 private transient ThreadLocalHoldCounter readHolds;
 // 缓存HoldCounter，表示当前活跃的重入线程
 private transient HoldCounter cachedHoldCounter; 
@@ -2434,7 +2494,7 @@ protected final int tryAcquireShared(int unused) {
                 return -1;
   					// 获取读锁当前重入数
             int r = sharedCount(c);
-  					// 判断阶段是否需要等待（当等待队列头结点不为共享节点时需要等待）
+  					// 判断阶段是否需要阻塞：非公平锁-队首节点为互斥节点需要阻塞；公平锁-等待队列中存在节点，且非当前线程，则需要阻塞
             if (!readerShouldBlock() &&
                 r < MAX_COUNT &&
                 // 读操作次数加一
@@ -2445,8 +2505,10 @@ protected final int tryAcquireShared(int unused) {
                 } else if (firstReader == current) {
                     firstReaderHoldCount++;
                 } else {
+                  	// 设置缓存线程，保存重入数量
                     HoldCounter rh = cachedHoldCounter;
                     if (rh == null || rh.tid != getThreadId(current))
+                      	// 新线程保存到threadLocal中
                         cachedHoldCounter = rh = readHolds.get();
                     else if (rh.count == 0)
                         readHolds.set(rh);
@@ -2481,7 +2543,6 @@ final boolean apparentlyFirstQueuedIsExclusive() {
             !s.isShared()         &&
             s.thread != null;
     }
-                compareAndSetState(c, c + SHARED_UNIT)) {
 // 自旋修改State值
 final int fullTryAcquireShared(Thread current) {
             /*
@@ -2545,6 +2606,7 @@ protected final boolean tryReleaseShared(int unused) {
             if (firstReader == current) {
                 // assert firstReaderHoldCount > 0;
                 if (firstReaderHoldCount == 1)
+                  	// 第一读线程释放锁之后，该字段一直为空。除非本轮读锁全部释放，进入下一轮读锁获取
                     firstReader = null;
                 else
                     firstReaderHoldCount--;
@@ -2608,6 +2670,80 @@ protected final boolean tryAcquire(int acquires) {
             setExclusiveOwnerThread(current);
             return true;
         }
+```
+
+#### 读写锁降级
+
+当数据需要进行更新时，则添加写锁，再添加读锁，待数据更新完成写锁释放，降级为读锁
+
+```java
+static class ReadWriteDegrade implements Runnable {
+        // 决定数据是否需要更新
+        static volatile boolean toUpdate = true;
+        // 数据更新次数
+        static int index = 0;
+        ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock();
+
+        @SneakyThrows
+        public void process() {
+            readWriteLock.readLock().lock();
+            if (toUpdate) {
+                readWriteLock.readLock().unlock();
+                readWriteLock.writeLock().lock();
+                try {
+                    if (toUpdate) {
+                        System.out.println("【数据更新开始...】" + index);
+                      	// 数据更新 ...
+                        Thread.sleep(1000);
+                        ++index;
+                        System.out.println("【数据更新完成...】" + index);
+                        toUpdate = false;
+                    }
+                    readWriteLock.readLock().lock();
+                } finally {
+                    readWriteLock.writeLock().unlock();
+                }
+            }
+
+            try {
+                // 业务流程
+                System.out.println(Thread.currentThread().getName() + ":" + index);
+            } finally {
+                if (readWriteLock.getReadHoldCount() > 0) {
+                    readWriteLock.readLock().unlock();
+                }
+            }
+        }
+
+        @SneakyThrows
+        @Override
+        public void run() {
+            while (true) {
+                process();
+                Thread.sleep(100);
+            }
+        }
+    }
+
+static void readWriteLockDegrade() {
+        ReadWriteDegrade readWriteDegrade = new ReadWriteDegrade();
+        Thread thread1 = new Thread(readWriteDegrade);
+        Thread thread2 = new Thread(readWriteDegrade);
+        Thread thread3 = new Thread(readWriteDegrade);
+        thread1.start();
+        thread2.start();
+        thread3.start();
+
+        try {
+            Thread.sleep(1000);
+            ReadWriteDegrade.toUpdate = true;
+
+            Thread.sleep(1000);
+            ReadWriteDegrade.toUpdate = true;
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
 ```
 
 ### LockSupport

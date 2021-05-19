@@ -757,6 +757,7 @@ tomcat是一个web容器，需要解决什么问题
 1. 一个web容器可能部署多个应用程序，不同应用程序可能依赖同一个第三方类库的不同版本，要求相互隔离。比如web应用存在一个同名的Servlet，各自实现不同，需要加载多分
 2. 部署在同一个web容器中相同的类库相同的版本可以共享，加载一次即可。比如Jar包中的同版本类
 3. Tomcat自身也是一个Java程序，需要隔离Tomcat本身的类和Web应用的类，避免相互影响，比如Web应用中定义了一个同名类导致Tomcat本身的类无法加载
+4. 实现jsp的热加载
 
 tomcat加载架构如下
 
@@ -768,6 +769,7 @@ tomcat加载架构如下
 - SharedClassLoader：用于web应用共享类加载，某些类库只需加载一次即可，其他web应用共享。各个webapp的共享类加载器，加载路径上的class对于tomcat不可见，对于所有webapp可见。路径/shared/*
 - CataLinaClassLoader：用于加载Tomcat本事的类，与其他应用类隔离。Tomcat容器私有的类加载器，加载路径上的class对于webapp不可见。路径/server/*
 - CommonLoader：作为CataLinaClassLoader和SharedClassLoader的父类加载器。Tomcat最基本的类加载器，加载路径上的class可被tomcat容器本身和各个webapp访问。路径/common/*
+- JasperLoade：加载jsp文件得到class文件，当web容器检测到jsp文件修改后，会替换调JasperLoader加载的类，通过建立一个新的类加载器实现了jsp文件的加载
 
 tomcat类加载
 
@@ -785,6 +787,8 @@ tomcat默认未配置<loader delegate="true"/>，则delegate默认false
 
 - 保证基础类不会被重复加载
 - 保证了同一个tomcat下不同web应用的class相互隔离
+
+当Common ClassLoader想加载WebApp ClassLoader中的类时，可通过上下文类加载器实现，让父类加载器加载请求子类加载器完成加载
 
 ### 7 虚拟机字节码与执行引擎
 
@@ -1327,7 +1331,7 @@ https://www.jianshu.com/p/22b5a0a78a9b
 
 三者共同点
 
-- 三者都用到了Lock Record记录，偏向锁和重量级锁只用到了其中_obj指正，轻量级锁都用到了
+- 三者都用到了Lock Record记录，偏向锁和重量级锁只用到了其中_obj指针，轻量级锁都用到了
 - 释放锁时都需要修改Lock Record中的_obj记录为空
 
 三者不同点
