@@ -17,7 +17,7 @@ https://blog.csdn.net/v_JULY_v/article/details/6105630?spm=1001.2014.3001.5506
 3. 根节点是黑色的，叶节点（指NIL节点或NULL节点）是黑色的
 4. 红色节点的子节点都是黑色
 5. 所有从根节点的到的NIL节点路径上的黑色节点数均相同
-6. 红黑色的查询、插入、删除的时间复杂度均为logN（插入分三种情况讨论，删除分四种情况讨论）
+6. 红黑色的查询、插入、删除的时间复杂度均为logN（插入分三种情况讨论，删除分四种情况讨论）。插入调整最不止三次，可能情况1一直发生，不断向根节点延申
 
 ## util
 
@@ -3288,10 +3288,11 @@ runState状态
 
     /** Wait queue for waiting puts */
 		// 当队列满时，获取该condition并阻塞当前线程，不能添加元素
+		// 仅当put方法和offer(timeout)中用到了，当队列满了阻塞
     private final Condition notFull = putLock.newCondition();
 ```
 
-
+Offer：当队列满了返回false。
 
 ```java
 // 往阻塞队列中添加元素，满了直接返回false
@@ -3610,6 +3611,10 @@ public List<Runnable> shutdownNow() {
         return tasks;
     }
 ```
+
+#### prestartAllCoreThreads
+
+提前启动所有核心线程，进行预热
 
 ### FixedThreadPool
 

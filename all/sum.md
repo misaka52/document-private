@@ -425,7 +425,7 @@ declared方法：获取类中声明的所有方法/字段，但不能获取从�
    6. 如何校验数字证书和数字签名？1. 拿到证书，获得明文T，数字签名S；2.使用公钥对数字签名S进行解密得到S'；3. 对明文T进行hash得到T'；4. 对比T'是否等于S'，若相等则证书可信
    7. 证书掉包问题？另一网站B也获取了CA机构的证书，然后截取网站A的信息，给他的请求者发送自己的证书信息，如何避免？证书上包含网站的信息，可以通过对比网站信息来判断证书是否被掉包
    
-2. 输入域名的请求流程
+2. 浏览器输入地址的全流程
    1. 在浏览器中输入url查询，浏览器查询是否存在缓存，判断缓存是否过期。分为两种缓存
       1. 强制缓存
          1. Cache-control：表示浏览器接收文件后，在响应的时间内文件均有效。
@@ -490,7 +490,63 @@ declared方法：获取类中声明的所有方法/字段，但不能获取从�
 
          ![](../image/a7741d3223791e04828b06cf566a6bf71603441882876.png)
 
-7. 
+
+7. TIME_WAIT过多问题
+
+   1. 背景：TCP四次挥手时，客户端收到发送第四次ack挥手确认后，进入TIME_WAIT状态，等待2MSL变为CLOSED，期间该端口不可被复用。长连接场景一般并发量小。TCP端口最多655356，不可扩增
+
+   2. 情况分析：当处于高并发短链接的场景下，业务处理时间低于等待关闭时间，导致业务执行完成后空等2MSL而无法被复用
+
+   3. 排查方式
+
+      ```sh
+      netstat -ant|awk '/^tcp/ {++S[$NF]} END {for(a in S) print (a,S[a])}'
+      LAST_ACK 14
+      SYN_RECV 348
+      ESTABLISHED 70
+      FIN_WAIT1 229
+      FIN_WAIT2 30
+      CLOSING 33
+      TIME_WAIT 18122
+      # 解释
+      nestat -ant 获取端口信息
+      awk '/^tcp' 获得tcp开头的记录，排除udp，socket等无关记录
+      NF 表示记录的字段数，如nestat得到六列，所以NF为6
+      $NF 表示某个字段的值，$6即第六个字段的值，比如有：TIME_WAIT、SYN_RECV
+      ++S[$NF] 表示对key值计数加一
+      END 表示后续需要执行的指令
+      for (key in S) 数组遍历
+      ```
+
+   4. 解决思路
+
+      1. 编辑内核文件/etc/sysctl.conf，加入以下内容
+
+      ```sh
+      net.ipv4.tcp_syncookies = 1 表示开启SYN Cookies。当出现SYN等待队列溢出时，启用cookies来处理，可防范少量SYN攻击，默认为0，表示关闭；
+      net.ipv4.tcp_tw_reuse = 1 表示开启重用。允许将TIME-WAIT sockets重新用于新的TCP连接，默认为0，表示关闭；
+      net.ipv4.tcp_tw_recycle = 1 表示开启TCP连接中TIME-WAIT sockets的快速回收，默认为0，表示关闭。
+      net.ipv4.tcp_fin_timeout 修改默认的 TIMEOUT 时间
+      net.ipv4.tcp_keepalive_time = 1200 
+      #表示当keepalive起用的时候，TCP发送keepalive消息的频度。缺省是2小时，改为20分钟。
+      net.ipv4.ip_local_port_range = 1024 65000 
+      #表示用于向外连接的端口范围。缺省情况下很小：32768到61000，改为1024到65000。
+      net.ipv4.tcp_max_syn_backlog = 8192 
+      #表示SYN队列的长度，默认为1024，加大队列长度为8192，可以容纳更多等待连接的网络连接数。
+      net.ipv4.tcp_max_tw_buckets = 5000 
+      #表示系统同时保持TIME_WAIT套接字的最大数量，如果超过这个数字，TIME_WAIT套接字将立刻被清除并打印警告信息。
+      默认为180000，改为5000。对于Apache、Nginx等服务器，上几行的参数可以很好地减少TIME_WAIT套接字数量，但是对于 Squid，效果却不大。此项参数可以控制TIME_WAIT套接字的最大数量，避免Squid服务器被大量的TIME_WAIT套接字拖死。
+      
+      1、改为长连接，但代价大，长连接并不适用于高并发短时场景
+      2、修改net.ipv4.ip_local_port_range，对外开放端口总数
+      3、打开tcp_tw_recycle选项开启TIME-WATI快速回收
+      4、tcp_max_tw_buckets设置一个较小值，表示TIME-WAIT缓存套接字少，超过阈值立即清理
+      5、开启tcp_tw_reuse，实现TIME-WAIT连接复用
+      6、调整tcp_max_syn_backlog加大等待连接的网络连接数
+      7、修改net.ipv4.tcp_fin_timeout，适当减少TIME-WAIT的持续时间
+      ```
+
+      2. 执行/sbin/sysctl -p让参数生效。/etc/sysctl.conf是一个允许改变正常运行中的linux机器的接口，且修改内核参数永久生效
 
 ## ElasticSearch
 
@@ -586,17 +642,22 @@ declared方法：获取类中声明的所有方法/字段，但不能获取从�
    3. 多路复用。单线程监控多个文件执行IO，三种实现方式select、poll、epoll
    4. 信号驱动IO。利用信号机制，让内核告诉应用程序文件描述符的相关事件
    5. 异步IO。和信号驱动IO差不多，相比多了一步在程序中完成从用户态到内核态的拷贝，异步IO完成拷贝这步后才通知应用程序，使用aio_read、aio_write
+   
 2. 熔断。当调用下游服务异常次数超过阈值，则开启熔断器，请求直接失败，避免下游服务影响现有服务
    1. 熔断器状态设置：关闭、开启、半开启。关闭：关闭熔断器，请求直接通过，但存在一个计数器记录成功和失败请求数量；开启：熔断器开启，请求直接走熔断方法，直接返回。当失败率超过阈值，则开启熔断器一段时间。开启熔断器后开启一个计数器，当计时器超时后将熔断器状态改为半开启状态；半开启：允许部分请求通过。开启计数器，记录期间请求成功率，当成功率超过阈值则将熔断器关闭，否则重置计数器，甚至开启熔断器
+   
 3. 降级。微服务中调用链长，设置当调用下游服务器超时时，直接走降级策略，加快请求处理
    1. 可以通过注解+aop方式实现。配置主键，超时时间+降级方法，拦截降级方法，将请求放至线程池中处理获得future，然后通过future超时获取结果，当超时时再通过反射调用降级方法
+   
 4. 限流。当请求过多超过限定阈值，则进行限流，超过阈值的请求直接失败
    1. 计数限流：通过计数器控制系统的最大并发处理量，当请求来了则减一，处理完毕则加一，可通过Atomic等原子类实现
    2. 固定窗口限流：相比计数限流多了时间窗口，在固定的时间段的设置计数器。当请求次数小于阈值，则处理且计数器加一；当请求次数大于阈值，拒绝；每过一个时间周期，计数器清零。固定窗口限流时间周期时固定，可能出现在一个连续区间内处理两倍的阈值流量
    3. 滑动窗口限流：记录每个请求的到达时间，当处理完毕可删除。流程：当请求过来后，查询前一周期（比如1s内）的请求数量，若为超过阈值则通过且记录请求；当超过阈值则拒绝；请求处理完毕后删除请求记录。该方案虽然保证了任何时间窗口内请求处理数都不会超过阈值，但需要记录请求内存消耗较大，且无法应对突然请求
    4. 漏桶算法：将请求放入桶中，以固定速率获取并处理（获取请求的速率固定，而非处理请求速率固定），当桶装满则直接拒绝新请求，即溢出。请求以规定速率处理，类似于mq消费
    5. 令牌桶算法：以固定速率生产令牌放入桶中，当桶满则丢弃令牌。当请求过来获取一定数量令牌处理，获取到令牌后才能处理请求，当无令牌则拒绝请求。可以用来处理短暂的突发请求，类似于信号量
+   
 5. 一致性hash为什么是2的32次方？因为ip地址是32位，针对IP地址做hash方便
+
 6. jvm程序突然挂了如何排查
    1. 查看应用日志。是否OOM
    2. 查看dump日志。当系统配置对应参数，在发生OOM时会生成dump文件。相关配置`-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/path/heapdump.hprof`
@@ -604,6 +665,7 @@ declared方法：获取类中声明的所有方法/字段，但不能获取从�
    4. 查看gc日志，判断宕机前是否发生频繁fullgc
    5. 查看机器监控指标。cpu、内存占用量
    6. OOM-kill机制：linux系统内核通过该机制监控内存占用过大，尤其是内存突然占用飙升的程序，并干掉。可通过/var/log/messages查看相关日志。内存占用=堆内存+元空间内存+直接内存
+   
 7. 机器CPU飙升问题排查
    1. 通过top定位cpu占用高的进程
    2. 使用top -Hp pid查看进程下线程资源占用情况，找出占用cpu资源高的线程id（top -Hp的pid即线程id）
@@ -611,6 +673,7 @@ declared方法：获取类中声明的所有方法/字段，但不能获取从�
    4. 通过jstack {pid} |grep {十六进制线程id}，分析死循环、死锁情况等
    5. 通过jmap -dump:format=b,file=dump.dat {pid}获取dump文件
    6. 通过jhat -port 8080 {文件名} 分析dump文件、或jvisualvm分析
+   
 1. 热榜功能怎么设计？
    1. top k
       1. 设计一个小顶堆，堆m大小为k。对于每条热搜都保存了搜索次数，每次排名都取出热搜中的每条数据，判断其与小顶堆堆顶元素比较，若小于小顶堆则跳过该元素；若大于则移除小顶堆元素，替换成新元素，重新调整堆。此时最坏时间复杂度为nlogk
@@ -627,24 +690,61 @@ declared方法：获取类中声明的所有方法/字段，但不能获取从�
    4. 中位数计算，计算的排名中间的元素
       1. 维护一个大顶堆和一个小顶堆，大顶堆保存前n/2的数据，小顶堆保存后n/2的数据。若新数据小于大顶堆则直接保存在大顶堆中，否则保存在小顶堆中。期间大小顶堆可通过数据互转来维持比例。
       2. TP99也可类比中位数统计
+   
 2. k8s的功能
    1. 容器化，镜像复制，资源管理，资源配置
    2. 发生异常自动重启，自动扩容
    3. 负载均衡
    4. 性能监控
+   
 10. session
     1. 保存在服务端内存，可持久化至redis、file、db。可用于存储登录信息，比如在客户端访问时创建sessionId，将该id回传给客户端，后续客户端可通过该id进行验证
     2. 客户端请求服务端自动创建session，存在超时时间，仅当过期或HttpSession.invalidate()时删除
+    
 11. spring中为什么要设计三级缓存？
     1. 一级缓存保存成品bean，二级缓存保存半成品bean，三级缓存保存半成品bean工厂
     2. 其中为了解决循环依赖的问题，实例化完成后（还未完成依赖注入和初始化）立即将bean保存到缓存中，以解决循环依赖
     3. 将bean保存到缓存中：因可能存在代理对象，spring一般在对象初始化完成才生成代理对象。但为了解决循环依赖问题，一旦存在循环依赖则必须提前生成代理对象，通过三级缓存实例工厂的方式实现，决定对象的真正实例对象
     4. spring为什么要在对象初始化完成才创建代理对象？应该是为了节约缓存，因为代理对象创建之后才能使用，若非特殊情况提前创建没用的对象的浪费资源
+    
 12. 处理大数据量解法。https://blog.csdn.net/v_JULY_v/article/details/6279498
     1. hash分片，mapreduce。分治归并
     2. top K，大小顶堆
     3. bit-map，布隆过滤器
     4. trie树-字典树：公用公共前缀，保存大量重复的字符串，压缩内存
+    
+13. SqlSession是线程安全的吗
+
+    1. sqlSession是一个接口，其实现类包括DefaultSqlSession、SqlSessionTemplate
+    2. DefaultSqlSession不是线程安全的
+    3. SqlSessionTemplate是线程安全的，其内部包含类SqlSessionInterceptor，其SqlSession由TransactionSychronizationManager管理，manager内置ThreadLocal<Map<sessionFactory, SqlSessionHolder>>。sessionFactory表示SqlSession配置信息工厂，SqlSessionHolder表示持有SqlSession的类
+    4. SqlSessionTemplate由事务管理决定是否共享SqlSession。事务内部共享SqlSession，同一线程共享SqlSession
+
+14. beanFactory和factoryBean区别
+
+    1. beanFactory是IOC容器或对象工厂，用于获取bean（没有则创建）、检测是否存在bean、判断bean是否为单例
+
+    2. factoryBean是一个bean，可以用来生成或修饰bean。比如主要用作创建代理类
+
+       ```java
+       public interface FactoryBean<T> {
+       
+       	//从工厂中获取bean
+       	@Nullable
+       	T getObject() throws Exception;
+       
+       	//获取Bean工厂创建的对象的类型
+       	@Nullable
+       	Class<?> getObjectType();
+       
+       	//Bean工厂创建的对象是否是单例模式
+       	default boolean isSingleton() {
+       		return true;
+       	}
+       }
+       ```
+
+       
 
 hr面
 

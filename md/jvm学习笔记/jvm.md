@@ -2001,7 +2001,7 @@ Show heap histogram  查看对象占用内存信息，instance count：实例数
 
 > 每增加一维数组以[开通，比如[[B表示byte的二维数组
 >
-> [B=byte，[D=double。
+> [B=byte，[D=double
 >
 > [[B表示二维byte数组，实际占用内存只有指向一维数组的引用大小，byte数组实际内存分配在一维数组中
 >
@@ -2035,6 +2035,33 @@ jdk自带工具，直接调用命令jvisualvm打开软件。选择文件->装入
 6. 超出交换区内存溢出，当jvm所请求的总内存大于机器物理内存时，操作系统将内容从内存转化为硬盘，一般会抛出out of swap space错误
 
 7. 数组超限内存溢出。数组申请过大导致内存超限，Requested array size exceeds VM limit，不同平台限制不同
+
+#### 3. k8s+OOM实战
+
+**1、栈局部变量+堆内存溢出**
+
+当无法申请更多的对内存，导致程序报错，方式异常。
+
+```
+java.lang.OutOfMemoryError: Java heap space
+	at com.jdaz.ysc.api.TestController.applyMemory$original$g4uU3msM(TestController.java:25) ~[classes!/:1.0.0-SNAPSHOT]
+	at com.jdaz.ysc.api.TestController.applyMemory$original$g4uU3msM$accessor$pMJei7Fi(TestController.java) ~[classes!/:1.0.0-SNAPSHOT]
+	...
+```
+
+后续机器尝试进行gc，则可回收这些内存（栈方法结束，本地变量可被立即回收），系统不会出现问题
+
+**2、类变量+堆内存溢出**
+
+Gc无法回收（方法申请内存被类局部变量或静态变量引用），则不停的进行full gc，系统会拒绝部分服务（需要申请内存的服务），后续依赖k8s的机制对机器进行驱逐
+
+** 3、机器内存不足**
+
+当pod内存不足时，导致OOMKilled。其内存应包含操作系统内存+jvm堆+jvm线程+元空间
+
+```
+ins-common-server-simple-68c6497db-hfz9j        0/1     OOMKilled          1          2m45s
+```
 
 ### 附录
 
