@@ -2421,13 +2421,7 @@ static final class NonfairSync extends Sync {
         final boolean writerShouldBlock() {
             return false; // writers can always barge
         }
-        final boolean readerShouldBlock() final boolean apparentlyFirstQueuedIsExclusive() {
-        Node h, s;
-        return (h = head) != null &&
-            (s = h.next)  != null &&
-            !s.isShared()         &&
-            s.thread != null;
-    }{
+        final boolean readerShouldBlock() {
             /* As a heuristic to avoid indefinite writer starvation,
              * block if the thread that momentarily appears to be head
              * of queue, if one exists, is a waiting writer.  This is
@@ -2437,6 +2431,14 @@ static final class NonfairSync extends Sync {
              */
             return apparentlyFirstQueuedIsExclusive();
         }
+    }
+
+final boolean apparentlyFirstQueuedIsExclusive() {
+        Node h, s;
+        return (h = head) != null &&
+            (s = h.next)  != null &&
+            !s.isShared()         &&
+            s.thread != null;
     }
 ```
 
