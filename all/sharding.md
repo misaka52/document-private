@@ -195,10 +195,10 @@ select * from table limit 0, {a+b}
 | sql                                                          | 原因                                                         |
 | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | INSERT INTO tbl_name (col1, col2, …) VALUES(1+2, ?, …)       | values语句不支持算术表达式<br />（可能很难动态计算value，依赖数据库计算，导致可能无法确定分片键） |
-| INSERT INTO tbl_name (col1, col2, …) SELECT col1, col2, … FROM tbl_name WHERE col3 = ? | insert into...select                                         |
+| INSERT INTO tbl_name (col1, col2, …) SELECT col1, col2, … FROM tbl_name WHERE col3 = ? | insert into...select(跨库查询聚合，无法定位分片键)           |
 | SELECT COUNT(col1) as count_alias FROM tbl_name GROUP BY col1 HAVING count_alias > ? | Having（应该可以实现，结果归并之后再having判断）             |
-| SELECT * FROM tbl_name1 UNION SELECT * FROM tbl_name2        | union                                                        |
-| SELECT * FROM tbl_name1 UNION ALL SELECT * FROM tbl_name2    | union all                                                    |
+| SELECT * FROM tbl_name1 UNION SELECT * FROM tbl_name2        | union（跨库查询合并）                                        |
+| SELECT * FROM tbl_name1 UNION ALL SELECT * FROM tbl_name2    | union all（跨库查询合并）                                    |
 | SELECT * FROM ds.tbl_name1                                   | 包含schema                                                   |
 | SELECT SUM(DISTINCT col1), SUM(col1) FROM tbl_name           | 使用普通聚合函数和DISTINCT函数                               |
 | SELECT * FROM tbl_name WHERE to_date(create_time, ‘yyyy-mm-dd’) = ? | 不支持函数动态计算，导致全路由                               |
@@ -231,4 +231,53 @@ select * from table limit 0, {a+b}
 **Hint分片策略HintShardingStrategy**：通过Hint而非sql方式分片的策略
 
 **不分片策略NoneShardingStrategy**：不进行分片，全表路由
+
+
+
+
+
+## 分库分表理解
+
+### 1. 垂直分表
+
+大表拆小表，通用的设计，按照业务逻辑拆分，最好在前期定义好
+
+#### 跨库join的问题
+
+在拆分前通过join连接，拆分后可能分到不同的库，此时join需要跨库实现，而基于规范、性能、安全等方面考虑，一般不支持跨库join
+
+解决思路
+
+**全局表**：公共信息保存在全局表中，在每个库都保存一份，这类数据很少发生变更
+
+**字段冗余**：为了方便查询，为表增加冗余字段。比如订单表增加商家id+商家名称，但维护时需要额外更新冗余字段表
+
+**数据组装**：先查询关联id，再从原表中查询数据
+
+**ER分片**：提前确定表的关联关系，保证关联关系的表记录存放在同一分片
+
+### 2. 水平分表
+
+将数据拆分到相同库表中，减少单表压力
+
+#### 分布式全局唯一ID
+
+1. SnowFlake
+2. UUID/GUID
+3. 数据库主键（集中式生成）
+
+#### 分片规则选择
+
+通常选择最常用的字段作为分片键
+
+分片策略分为连续分片和随机分片，比如按照时间分片和订单号分片
+
+#### 问题
+
+1. 跨分片的排序分页，数据量比较大可能无法执行
+2. 跨分片的函数处理。在使用MAX、MIN、SUM、AVG等函数时，需要对sql进行改造，先获取原始数据再进行二次计算
+3. 跨分片join：非常复杂，应尽量避免。可采用一下方式解决
+   1. 全局表
+   2. ER分片，建立好的关联关系，将存在关联关系的数据记录在一个分片上
+   3. 内存计算，通过spark集群处理大数据量
 

@@ -160,6 +160,7 @@ level：记录跳跃表内，层数最大的节点的层数
 length：跳跃表包含的节点数量
 
 **zskiplistNode结构**
+
 ```c
 typedef struct zskiplistNode {
     // 层
@@ -480,7 +481,7 @@ zrem key member # 移除元素
 
 **skiplist编码**
 
-采用dict+skiplist实现。dict保存元素和分支，skiplist保存有序列表结构
+采用dict+skiplist实现。dict保存元素和分值，skiplist保存有序列表结构
 
 查询元素是否存在直接查询dict，范围查询通过skiplist实现
 
