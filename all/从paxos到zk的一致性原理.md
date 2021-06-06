@@ -454,8 +454,134 @@ Client port found: 2181. Client address: localhost. Client SSL: false.
 - watcher：监听器
 - canBeReadOnly：是否支持只读模式。在zk集群中，当leader与半数以上机器失去了联系则集群不可用。但在某些场景下，允许此类故障的发生，且能读取到数据，这就是只读模式
 - sessionId和sessionPasswd：表示会话ID和会话秘钥，能够确定唯一一个会话，可达到会话复用的效果。
+- sessionTimeout：session超时时间，单位毫秒。临时界面在超时关闭后才会删除
+- Watch：可使用多次，监听回调
 
 > 监听注册通知仅生效一次，当通知后监听器失效，若需要反复监听需手动注册
+
+```java
+static ZooKeeper connect() throws IOException {
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        ZooKeeper zooKeeper = new ZooKeeper("localhost:2181,localhost:2182,localhost:2183",
+                10000, new MyWatcher(countDownLatch));
+        try {
+            countDownLatch.await();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        System.out.println("zk synchronized success");
+        return zooKeeper;
+    }
+static class MyWatcher implements Watcher {
+        private CountDownLatch countDownLatch;
+
+        public MyWatcher(CountDownLatch countDownLatch) {
+            this.countDownLatch = countDownLatch;
+        }
+
+        @Override
+        public void process(WatchedEvent watchedEvent) {
+            System.out.println("receive " + watchedEvent);
+            if (watchedEvent.getState() == Event.KeeperState.SyncConnected) {
+
+                if (Event.EventType.None == watchedEvent.getType() && null == watchedEvent.getPath()) {
+                    System.out.println("synchronized success");
+                    countDownLatch.countDown();
+                } else if (watchedEvent.getType() == Event.EventType.NodeDataChanged) {
+                    try {
+                        System.out.println("watch callback");
+                        System.out.println(new String(zooKeeper.getData(watchedEvent.getPath(), true, stat)));
+                        System.out.println(stat.getCzxid() + "," + stat.getMzxid() + "," + stat.getVersion());
+                    } catch (KeeperException e) {
+                        e.printStackTrace();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }
+    }
+```
+
+#### 5.3.2 创建节点
+
+- path：节点路径
+- data：节点数据
+- acl：acl策略
+- cb：异步回调函数，需实现StringCallback接口
+- ctx：传入一个对象，传递上下文信息
+
+同步创建方法，无回调函数，创建后返回结果，当节点存在时，返回NodeExistException
+
+异步创建方法，实现回调函数，函数返回字段
+
+- rc：result code
+  - 0：接口调用成功
+  - -4：客户端与服务端连接已断开
+  - -110：节点已存在
+  - -112：会话已过期
+- path：创建节点时输入的路径
+- ctx：上下文
+- real path：znode实际的路径
+
+```java
+static void create(ZooKeeper zooKeeper) throws KeeperException, InterruptedException {
+        // 同步创建节点
+        String path1 = zooKeeper.create("/test/server/p1", "v1".getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE
+                , CreateMode.PERSISTENT_SEQUENTIAL);
+        System.out.println("success create znode :" + path1);
+
+        // 临时节点等待session关闭后才会删除
+        String path2 = zooKeeper.create("/test/server/p1", "v2".getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE
+                , CreateMode.EPHEMERAL_SEQUENTIAL);
+        System.out.println("success create znode :" + path2);
+
+        // 异步创建节点
+        zooKeeper.create("/test/server/p2", "v3".getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE
+                , CreateMode.PERSISTENT_SEQUENTIAL, new MyStringCallback(), "hello zk");
+
+    }
+```
+
+#### 5.3.3 删除节点
+
+仅允许删除叶子节点
+
+删除时必须携带版本号，以确保删除正确的数据。当版本号传入-1时表示不校验版本号
+
+```java
+// 同步删除方法，当删除不存在的节点或节点存在但版本号不正确，则抛出异常
+static void delete(ZooKeeper zooKeeper) throws KeeperException, InterruptedException {
+//        zooKeeper.delete("/test/server/p2", 3);
+        zooKeeper.delete("/test/server/p2", -1);
+    }
+```
+
+#### 5.3.4 读取数据
+
+- watch：一旦节点发生变化触发回调，仅可使用一次。实现AsyncCallback.DataCallback
+
+```java
+static void getData2(ZooKeeper zooKeeper) throws KeeperException, InterruptedException {
+        String path = "/test/server/p3";
+        zooKeeper.create(path, "123".getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
+        // 监听上一事件
+        zooKeeper.getData(path, true, new MyDataCallback(), null);
+        zooKeeper.setData(path, "233".getBytes(), -1);
+        // 监听上一事件
+        //zooKeeper.getData(path, true, new MyDataCallback(), null);
+    }
+```
+
+#### 5.3.5 更新数据
+
+#### 5.3.6 判断节点是否存在
+
+- watch：实现Watcher，可一直使用
+
+无论节点是否存在，都可以注册
+
+#### 5.3.7 权限控制
 
 ### 5.4 开源客户端
 
@@ -463,9 +589,14 @@ Client port found: 2181. Client address: localhost. Client SSL: false.
 
 github上开源的ZooKeeper客户端
 
+- createPresistent：当父节点不存在时，创建父节点
+- deleteRecursive：循环遍历删除节点
+
 #### 5.4.2 Curator
 
 开源zk客户端框架，是目前使用最广泛的zk客户端之一
+
+自动注册watcher
 
 ## 6 ZooKeeper的典型应用场景
 
