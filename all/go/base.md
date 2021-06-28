@@ -211,6 +211,8 @@ func switchCondition(score int) string {
 		grade = "B"
 	case score < 100:
 		grade = "A"
+    default:
+    gread = "E"
 	}
 	return grade
 }
@@ -544,9 +546,9 @@ strings集合
 - strings.index(string, string) int：找到第一个子串的位置并返回。当目标子串不存在时返回-1
 - string.trim(string, string) string：取出首尾固定字符串。常用来取出空白字符
 
-### 面向对象
+## 面向对象
 
-#### 1. 结构体和方法
+### 1. 结构体和方法
 
 - 通过 type {name} struct 定义结构体
 - go语言中不支持继承和多态
@@ -635,12 +637,13 @@ func main() {
 }
 ```
 
-#### 2. 包和封装
+### 2. 包和封装
 
 - 使用驼峰命名法
 - 首字母大写表示public，首字母小写表示private。适用于结构体、结构体方法、结构体变量
+- 不允许引入重名的包名
 
-#### 3. 扩展已有类型
+### 3. 扩展已有类型
 
 - 别名或组合
 
@@ -688,7 +691,7 @@ func (myNode *myTreeNode) postOrder() {
 }
 ```
 
-#### 4. 使用内嵌扩展已有类型
+### 4. 使用内嵌扩展已有类型
 
 扩展方法
 
@@ -696,13 +699,13 @@ func (myNode *myTreeNode) postOrder() {
 - 组合：最常用
 - 内嵌：可节省很多代码
 
-### Go语言的依赖管理
+## Go语言的依赖管理
 
-#### 1. 依赖管理
+### 1. 依赖管理
 
 依赖管理的三个阶段：GOPATH，GOVENDOR，go mod
 
-#### 2. GOPATH和GOVENDOR
+### 2. GOPATH和GOVENDOR
 
 包寻找路径: GOVENDOR > GOROOT > GOPATH
 
@@ -712,7 +715,7 @@ govendor在每个项目下新增vendor目录，来实现版本控制，完成不
 
 缺点：依赖管理不完善，GOPATH不具备版本号管理，GOVENDOR产生了依赖拷贝，项目臃肿
 
-#### 3. go mod
+### 3. go mod
 
 获取依赖（不指定版本号时默认拉取最新版本）：go get -u go.uber.org/zap[@v1.17]
 
@@ -732,11 +735,395 @@ go build ./...
 
 迁移旧项目（GOPATH或GOVENDOR）：go mod init > mod build ./...
 
-#### 4. 目录管理
+### 4. 目录管理
 
 go中一个目录下只能有一个main函数，项目才能整体运行（可以存在多个main函数单独运行）
 
 go build ./... 对当前目录及子目录下的所有go文件进行编译检查，不生成结果
 
 go install ./... 对当前目录及子目录下的所有文件执行并生成结果（目标文件可执行，结果为输出），文件输出至${GOPATH}/bin目录下
+
+## 面向接口
+
+### 1. 接口的概念
+
+面向接口编程，通过接口封装实现功能
+
+### 2. duck typing
+
+### 3. 接口实现
+
+- 实现方只需实现对应接口，无需关注接口名
+
+**mock实现**
+
+**mock包实现**
+
+```go
+package mock
+
+type Retriever struct {
+	Contents string
+}
+
+func (r Retriever) Get(url string) string {
+	return r.Contents
+}
+```
+
+**real实现**
+
+```go
+package real
+
+import (
+	"net/http"
+	"net/http/httputil"
+	"time"
+)
+
+type Retriever struct {
+	UserAgent string
+	TimeOut   time.Duration
+}
+
+func (r Retriever) Get(url string) string {
+	resp, err := http.Get(url)
+	if err != nil {
+		panic(err)
+	}
+	result, err := httputil.DumpResponse(resp, true)
+	resp.Body.Close()
+	return string(result)
+}
+```
+
+**接口层**
+
+```go
+package main
+
+import (
+   "fmt"
+   "hellogo/retriever/mock"
+   "hellogo/retriever/real"
+)
+
+type retrieverImpl interface {
+   Get(string) string
+}
+
+func download(r retrieverImpl) string {
+   return r.Get("http://www.baidu.com")
+}
+
+func main() {
+   var r retrieverImpl
+   r = mock.Retriever{Contents: "this is mock retriever"}
+   r = real.Retriever{}
+   fmt.Println(download(r))
+}
+```
+
+### 4. 接口的类型和值
+
+- Type Assertion/Type switch：r.(type) 获取到对应类型变量
+
+```go
+func main() {
+	var r retrieverIntf
+	r = mock.Retriever{Contents: "this is mock retriever"}
+	inspect(r)
+	r = &real.Retriever{
+		UserAgent: "Mozilla/5.0",
+		TimeOut:   time.Minute,
+	}
+	inspect(r)
+
+	if v, ok := r.(*mock.Retriever); ok {
+		fmt.Println("This is mock retriever. content=", v.Contents)
+	} else {
+		fmt.Println("This is not mock retriever")
+	}
+}
+
+func inspect(r retrieverIntf) {
+	fmt.Print("inspecting", r)
+  // %T：打印类型，%v：打印值
+	fmt.Printf("type:%T value:%v\n", r, r)
+	fmt.Print(" > Type switch: ")
+	switch v := r.(type) {
+	case mock.Retriever:
+		fmt.Println("mock retriever, ", v.Contents)
+	case *real.Retriever:
+		fmt.Println("real retriever, ", v.UserAgent)
+	}
+}
+```
+
+**泛型表示**
+
+- 表示任何类型：interface{}，可用于泛型参数传递。t为interface{}类型，通过t.(int)将其强制转换为int类型
+
+```go
+type Queue []interface{}
+
+func (q *Queue) push(value interface{}) {
+	*q = append(*q, value.(int))
+}
+
+func (q *Queue) pop() interface{} {
+	head := (*q)[0]
+	*q = (*q)[1:]
+	return head
+}
+
+func (q *Queue) isEmpty() bool {
+	return len(*q) == 0
+}
+func main() {
+	q := Queue{1}
+
+	q.push(2)
+	q.push(3)
+	fmt.Println(q.pop())
+	fmt.Println(q.pop())
+	fmt.Println(q.isEmpty())
+	fmt.Println(q.pop())
+	fmt.Println(q.isEmpty())
+
+	q.push("abc")
+	fmt.Println(q.pop())
+}
+```
+
+### 5. 常用系统接口
+
+**string**
+
+实现类似于java的toString方法
+
+```go
+func (r Retriever) String() string {
+	return fmt.Sprintf("MockRetriever:{content=%s}", r.Contents)
+}
+```
+
+**read/write**
+
+```go
+func printFile(filename string) {
+	fmt.Println("start print file, filename=", filename)
+	file, err := os.Open(filename)
+	if err != nil {
+		panic(err)
+	}
+	printFileContents(file)
+	fmt.Println("print end!!!")
+}
+
+func printFileContents(reader io.Reader) {
+	scanner := bufio.NewScanner(reader)
+
+	for scanner.Scan() {
+		fmt.Println(scanner.Text())
+	}
+}
+
+func main() {
+	printFile("abc.txt")
+	// 可包含特殊字符，换行
+	s := `fabba
+		"fdaf"
+		81923fdsa
+
+	fds	`
+	printFileContents(strings.NewReader(s))
+}
+```
+
+### 6. 函数式编程
+
+- 函数内部不需要修饰如何访问自由变量
+- 没有lambda表达式，只有匿名函数
+
+## 错误处理和资源管理
+
+1. defer多个？
+
+### 1. defer
+
+- 在程序退出前执行，多个defer命令先进后出
+- 常用语资源关闭、锁释放
+
+```go
+func WriteFile(filename string) {
+	file, err := os.OpenFile(filename, os.O_EXCL|os.O_CREATE|os.O_WRONLY, 0666)
+
+	if err != nil {
+		if pathError, ok := err.(*os.PathError); !ok {
+			panic(err)
+		} else {
+			fmt.Printf("%s %s %s\n", pathError.Op, pathError.Path, pathError.Err)
+		}
+	}
+	defer file.Close()
+
+	writer := bufio.NewWriter(file)
+	defer writer.Flush()
+
+	f := Fibonacci()
+	for i := 0; i < 20; i++ {
+		fmt.Fprintln(writer, f())
+	}
+}
+```
+
+### 2. panic&recover
+
+**panic**
+
+抛出异常
+
+**recover**
+
+捕获异常
+
+```go
+func tryRecover() {
+	// 创建匿名函数并调用
+	defer func() {
+		r := recover()
+		if err, ok := r.(error); ok {
+			fmt.Println("error occurred:", err)
+		} else {
+			panic(fmt.Sprintf("I don't konw what to handle it: %v", r))
+		}
+	}()
+	// 1. 创建异常
+	//panic(errors.New("this is an error"))
+	// 2. 其他类型
+	panic(123)
+}
+```
+
+### 3. 服务异常统一处理
+
+Filelisting.go
+
+```go
+package filelisting
+
+import (
+	"io/ioutil"
+	"net/http"
+	"os"
+	"strings"
+)
+const prefix = "/list/"
+
+func HandleFileListing(writer http.ResponseWriter,
+	request *http.Request) error {
+	if strings.Index(request.URL.Path, prefix) != 0 {
+		return userError("url must start with " + prefix)
+	}
+	path := request.URL.Path[len(prefix):]
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	all, err := ioutil.ReadAll(file)
+	if err != nil {
+		return err
+	}
+	writer.Write(all)
+	return nil
+}
+
+type userError string
+
+func (e userError) Error() string {
+	return e.Message()
+}
+
+func (e userError) Message() string {
+	return string(e)
+}
+
+```
+
+Web.go
+
+```go
+package main
+
+import (
+	"fmt"
+	"hellogo/errorhandling/fileserver/filelisting"
+	"log"
+	"net/http"
+	"os"
+)
+
+type appHandler func(writer http.ResponseWriter,
+	request *http.Request) error
+
+func errWrapper(handler appHandler) func(http.ResponseWriter,
+	*http.Request) {
+	return func(writer http.ResponseWriter,
+		request *http.Request) {
+		defer func() {
+			r := recover()
+			if r != nil {
+				fmt.Printf("panic:%v", r)
+				http.Error(writer,
+					http.StatusText(http.StatusInternalServerError),
+					http.StatusInternalServerError)
+			}
+		}()
+		err := handler(writer, request)
+		if userErr, ok := err.(userError); ok {
+			log.Println("userError occurred:", userErr)
+			http.Error(writer, userErr.Message(), http.StatusBadRequest)
+			return
+		}
+
+		code := http.StatusOK
+		if err != nil {
+			log.Printf("handle error。err: %s", err)
+			switch {
+			case os.IsNotExist(err):
+				code = http.StatusNotFound
+			case os.IsPermission(err):
+				code = http.StatusForbidden
+			default:
+				code = http.StatusInternalServerError
+			}
+		}
+		http.Error(writer, http.StatusText(code), code)
+	}
+}
+
+type userError interface {
+	error
+	Message() string
+}
+
+/**
+开启了一个文件服务器，指定tcp端口
+内含异常处理，结合：error+panic+recover
+*/
+func main() {
+	http.HandleFunc("/",
+		errWrapper(filelisting.HandleFileListing))
+
+	err := http.ListenAndServe(":8888", nil)
+
+	if err != nil {
+		panic(err)
+	}
+}
+```
 
