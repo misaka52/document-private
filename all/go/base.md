@@ -2,7 +2,9 @@
 
 ### 安装
 
-https://studygolang.com/dl
+https://golang.google.cn/ go官网
+
+https://studygolang.com/dl go中文学习社区，可下载最新版本go
 
 配置环境变量
 
@@ -11,22 +13,25 @@ https://studygolang.com/dl
 go version
 // 查看go环境变量
 go env
-// 更换go代理地址为国内。代理含义，首选goproxy，否则再直接拉取
+// 更换go代理地址为国内，更快的下载依赖。代理含义，首选goproxy，否则再直接拉取
 go env -w GOPROXY=https://goproxy.cn,direct
-// go依赖管理，运用新model机制
+// go依赖管理，运用新model机制，下载包更快
 go env -w GO111MODULE=on
-// 安装goimports
+// 安装goimports工具，自动管理依赖。在idea中和filewatcher配合使用
 go get -v golang.org/x/tools/cmd/goimports
 ```
 
 ### IDE
 
-idea+go插件
+##### idea+go插件
 
 插件安装
 
 - go
-- file watcher
+- file watcher。作用：自动导入包、自动格式化代码、代码提示
+  - Perference，搜索inlay Hints勾选go，去掉函数参数提示
+
+#### GoLand
 
 ## 基础语法
 
@@ -949,12 +954,11 @@ func main() {
 
 ## 错误处理和资源管理
 
-1. defer多个？
-
 ### 1. defer
 
 - 在程序退出前执行，多个defer命令先进后出
 - 常用语资源关闭、锁释放
+- 若defer中包含计算表达式，则会先计算，将结果放入栈中，再最后执行
 
 ```go
 func WriteFile(filename string) {
@@ -1126,4 +1130,523 @@ func main() {
 	}
 }
 ```
+
+## 测试
+
+### 1. 单元测试
+
+- 测试文件必须以_test结尾，如norepeating_test.go
+- 测试方法必须以Test开头，如TestNoRepeating(t *testing.T){}
+
+样例
+
+```go
+// triangle.go
+func CalTriangle(a, b int) int {
+	return int(math.Sqrt(float64(a*a + b*b)))
+}
+
+// triangle_test.go
+func TestTriangle(t *testing.T) {
+	tests := []struct{ a, b, c int }{
+		{3, 4, 5},
+		{3, 4, 4},
+		{3, 4, 3},
+		{5, 12, 13},
+		{8, 15, 17},
+		{12, 35, 37},
+		{30000, 40000, 50000},
+	}
+
+	for _, tt := range tests {
+		if res := CalTriangle(tt.a, tt.b); res != tt.c {
+			t.Errorf("CalTriangle(%d, %d)=%d, but expect %d", tt.a, tt.b, res, tt.c)
+		}
+	}
+}
+```
+
+输出
+
+```
+=== RUN   TestTriangle
+    triangle_test.go:20: CalTriangle(3, 4)=5, but expect 4
+    triangle_test.go:20: CalTriangle(3, 4)=5, but expect 3
+--- FAIL: TestTriangle (0.00s)
+FAIL
+```
+
+### 2. 代码覆盖率
+
+使用idea或命令行生成代码覆盖率
+
+```sh
+# 生成代码覆盖率文件
+go test -coverprofile=c.out
+# 以网页的形式查看覆盖率输出文件
+go tool cover -html=c.out
+```
+
+### 3. 性能测试
+
+- 方法名以BenchMark开头
+- 命名行执行：go test -bench .
+
+```go
+func BenchmarkMaxLenNoRepeatString(b *testing.B) {
+	s := "黑化肥挥发发灰会花飞灰化肥挥发发黑会飞花"
+	expect := 8
+  // b.N 表示系统决定运行次数
+	for i := 0; i < b.N; i++ {
+		if res := MaxLenNoRepeatString(s); res != expect {
+			b.Errorf("MaxLenNoRepeatString(%s)=%d, but expect %d", s, res, expect)
+		}
+	}
+}
+```
+
+输出
+
+```go
+goos: darwin
+goarch: amd64
+pkg: hellogo/test/norepeating
+cpu: Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz
+BenchmarkMaxLenNoRepeatString
+BenchmarkMaxLenNoRepeatString-12    	 1214302	      1071 ns/op
+PASS
+```
+
+### 4. 使用pprof进行优化
+
+pprof可以通过性能测试生成对应文件，从而查看分析耗时步骤，需下载插件才能查看svg文件：www.graphviz.org
+
+go test -bench . -cpuprofile cpu.out 生成性能分析文件
+
+go tool pprof cpu.out  通过工具查看输出文件，进入命令行交互模式，输入"web"查看网页版文件
+
+> 箭头越粗，方框越大表示耗时占比越高
+
+![image-20210630004503285](../../image/image-20210630004503285.png)
+
+### 5. 测试http服务器
+
+分为两种，直接调方法接口，和模拟服务器调用http接口两种
+
+### 6. 生成文档
+
+```sh
+# 查看接口queue的方法，无注释
+go doc queue
+# 查看方法IsEmpty
+go doc IsEmpty
+```
+
+**godoc**
+
+可以生成网页版的本地程序文档。文档中可以将注释生成对应文档
+
+- 增加空 // 表示换行
+- 注释行前面增加tab表示为代码框
+
+> godoc 在1.13移除了，可通过go get golang.org/x/tools/cmd/godoc安装go
+
+通过命令开启生成网页版文档：Godoc -http :6060
+
+**Example test**
+
+简单的测试用例文件，通过注释标记期望结果。第一行为”Output:“，下面为期望结果，均使用行注释
+
+```go
+func ExampleQueue_Pop() {
+	q := Queue{1}
+	q.Push(2)
+	q.Push(3)
+	fmt.Println(q.Pop())
+	fmt.Println(q.Pop())
+	fmt.Println(q.IsEmpty())
+
+	fmt.Println(q.Pop())
+	fmt.Println(q.IsEmpty())
+
+	// Output:
+	//1
+	//2
+	//false
+	//3
+	//true
+}
+```
+
+##  Goroutine
+
+### 1. Goroutine
+
+go并发编程，通过go func(){}()并发开启多个协程操作
+
+线程和协程的区别
+
+- 协程是一种轻量级线程，完全由用户控制调度（非抢占式）
+
+- 线程是抢占式的，协程时非抢占式的，只能自己释放资源
+- 线程进程都是同步的，协程是异步的
+- 一个线程包含多个协程
+
+```go
+func main() {
+	const conc = 10
+	var a [conc]int
+	for i := 0; i < conc; i++ {
+		go func(j int) {
+			for true {
+				a[j]++
+			}
+		}(i)
+	}
+	time.Sleep(time.Millisecond)
+	fmt.Println(a)
+}
+```
+
+> 协程是非抢占式的，对于go1.14版本之前，上述代码会因为协程一直占用cpu没有释放（线程资源大于cpu核数，mac i7 6核测试，因超线程的存在，一核两用，在1.14版本之前12线程开始程序就死循环），导致main函数无法获取cpu资源，也无法停止程序。
+>
+> go1.14版本后进行了优化， 可以异步抢占
+>
+> 也可以使用runtime.Gosched()主动释放cpu资源
+
+go run -race test.go 可以查看数据访问冲突
+
+### 2. go语言的调度器
+
+goruntine提供了协程并发执行，协程是非抢占式的。但是go语言调度器控制了部分抢占式调度时机进行cpu切换，切换的点如下（包含，还有其他未列举的点）
+
+- IO，select
+- channel
+- 等待锁
+- 函数调用（有时）
+- runtime.Gosched()
+
+## channel
+
+### 1. 基本用法
+
+c -< 'a' 向channel c发数据
+
+<-c 从channel c中接收数据
+
+channel缓存区，超过指定缓存区才死机
+
+Chan<- int 定义只发送数据类型的channel
+
+<-chan int 定义只接受数据类型的channel
+
+**channel close**
+
+调用close(c) 关闭channel，但channel仍会接收数据0，可通过
+
+1. n, ok := <-c，通过ok判断是否结束
+2. for n := range c，range自动判断channel是否关闭
+
+**不要通过共享内存来通信，要通过通信来共享内存**
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func worker(c chan int, id int) {
+	//for {
+	//	n, ok := <-c
+	// 	通过ok判定channel是否关闭
+	//	if !ok {
+	//		break
+	//	}
+	//	fmt.Printf("%d receiver %d\n", id, n)
+	//}
+	// range自动判定channel是否关闭
+	for n := range c {
+		fmt.Printf("%d receiver %d\n", id, n)
+	}
+}
+
+func createWorker(id int) chan int {
+	// 定义channel，返回类型int
+	c := make(chan int)
+	// 调用监听方法
+	go worker(c, id)
+	return c
+}
+
+func chanDemo() {
+	const n = 10
+	var channels [n]chan int
+	for i := 0; i < n; i++ {
+		channels[i] = createWorker(i + 1)
+	}
+
+	for i := 0; i < n; i++ {
+		// 向channel发送数据
+		channels[i] <- 'a' + i
+	}
+
+	for i := 0; i < n; i++ {
+		channels[i] <- 'A' + i
+	}
+	// 睡眠一定时间，保证go runtine方法打印出接收数据
+	time.Sleep(time.Millisecond)
+}
+
+func bufferChan() {
+  // channel缓存区大小3，发送消息超过3仍未被接收则发生deadlock
+	c := make(chan int, 3)
+	go worker(c, 10)
+	c <- 1
+	c <- 2
+	c <- 3
+	c <- 4
+
+	time.Sleep(time.Millisecond)
+}
+
+func chanClose() {
+	c := make(chan int)
+	go worker(c, 11)
+	c <- 1
+	c <- 2
+	c <- 3
+
+	close(c)
+	time.Sleep(time.Millisecond)
+}
+
+func main() {
+	//bufferChan()
+	chanClose()
+}
+```
+
+### 2. 等待channel关闭
+
+1. 定义一个channel来进行通信，进而共享内存，通过channel关闭结果
+2. 使用系统提供的等待channel，sync.WaitGroup
+   1. Add(): 设置通信阈值
+   2. Done(): 发送完成消息
+   3. Wait(): 等待所有消息
+
+### 3. select的使用
+
+- 接收各种channel的动作。对于为nil的channel，select仍然可以使用，不过不会进入对应case
+- 定时器的使用：time.Tick(time.Second)，返回一个只收的channel，定时接收数据
+- time.After(time.Second)，在指定时间后接收数据
+
+### 4. 传统同步模式
+
+go一般使用channel来解决并发通信，也可以使用传统加锁同步模式实现并发编程
+
+```go
+package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+type atomicInt struct {
+	value int
+	lock  sync.Mutex
+}
+
+func (a *atomicInt) get() int {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	return a.value
+}
+
+func (a *atomicInt) increment() {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	a.value++
+}
+
+func main() {
+	var a atomicInt
+	a.increment()
+	go func() {
+		a.increment()
+	}()
+	time.Sleep(time.Millisecond)
+	fmt.Println(a.get())
+}
+
+```
+
+### 5. 并发模式
+
+以下实现一个并发处理多个channel的程序，通过将多个channel的数据发送到统一channel，异步处理。
+
+合并channel的方式如下
+
+1. 每个channel开启一个go runtine，将数据传递给统一channel。开启了多个go runtine，适用于未知channel个数的聚合
+2. 利用select，枚举各种channnel输出，仅开启一个go runtine，适用于已知个数且个数很少的channel合并
+
+```go
+package main
+
+import (
+	"fmt"
+	"math/rand"
+	"time"
+)
+
+func msgGen(name string) chan string {
+	c := make(chan string)
+	go func() {
+		i := 0
+		for {
+			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+			c <- fmt.Sprintf("%s send %d", name, i)
+			i++
+		}
+	}()
+	return c
+}
+
+// 不确定channel的个数
+func fallIn(chs ...chan string) chan string {
+	c := make(chan string)
+	for _, channel := range chs {
+		go func(in chan string) {
+			for {
+				c <- <-in
+			}
+		}(channel)
+	}
+	return c
+}
+
+// 确定channel的个数，使用select
+func fallInSelect(c1, c2 chan string) chan string {
+	c := make(chan string)
+	go func() {
+		for {
+			select {
+			case m := <-c1:
+				c <- m
+			case m := <-c2:
+				c <- m
+			}
+		}
+	}()
+	return c
+}
+
+// 并行发送消息，通过统一channel接收多个channel的数据，打印
+func main() {
+	c1 := msgGen("service1")
+	c2 := msgGen("service2")
+	c3 := msgGen("service3")
+	c := fallIn(c1, c2, c3)
+	//c := fallInSelect(c1, c2)
+	for {
+		fmt.Println(<-c)
+	}
+}
+```
+
+### 6. 非阻塞等待/超时等待/退出
+
+```go
+package main
+
+import (
+	"fmt"
+	"math/rand"
+	"time"
+)
+
+// chan struct{} 可以直接传递空数据
+func msgGen(name string, done chan struct{}) chan string {
+	c := make(chan string)
+	go func() {
+		i := 0
+		for {
+			select {
+			case <-time.After(time.Duration(rand.Intn(1000)) * time.Millisecond):
+				c <- fmt.Sprintf("%s send %d", name, i)
+				i++
+			// 等待结束信号
+			case <-done:
+				fmt.Println("cleaning up")
+				time.Sleep(2 * time.Second)
+				fmt.Println("cleaning done")
+				done <- struct{}{}
+				return
+			}
+		}
+	}()
+	return c
+}
+
+func nonBlockingWait(c chan string) (string, bool) {
+	select {
+	case n := <-c:
+		return n, true
+	default:
+		return "", false
+	}
+}
+
+func timeoutWait(c chan string, timeout time.Duration) (string, bool) {
+	select {
+	case n := <-c:
+		return n, true
+	case <-time.After(timeout):
+		return "", false
+	}
+}
+
+func main() {
+	done := make(chan struct{})
+	c := msgGen("service1", done)
+	for i := 0; i < 5; i++ {
+		if v, ok := timeoutWait(c, time.Duration(500)*time.Millisecond); ok {
+			fmt.Println(v)
+		} else {
+			fmt.Println("timeout")
+		}
+	}
+	// 通知channel数据发送完成
+	done <- struct{}{}
+	// 等待channel成功关闭
+	<-done
+}
+```
+
+## 标准库
+
+### Fmt.Print
+
+- fmt.Sprintf()：将对应数据转换成字符串返回
+
+### http
+
+- get
+  - 添加User-Agent来控制网页类型（pc版，手机版）
+
+Tips:
+
+- import _ "net/http/pprof" 导入但不直接使用
+- 访问/debug/pporf
+- 使用go tool pprof分析性能
+  - web程序引入pprof包，可以完成相关监控。import_ "net/http/pprof"，访问地址：debug/pprof/
+  - sh命令：go tool pprof http://localhost:8888/debug/pprof/profile，统计30s的cpu利用率
+  - sh命令：go tool pprof http://localhost:8888/debug/pprof/heap，统计30s的堆内存使用情况
+
+### httputil
+
+dumpResponse()
 
