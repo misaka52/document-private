@@ -1650,3 +1650,27 @@ Tips:
 
 dumpResponse()
 
+### json
+
+包：encoding/json
+
+网络传输一般使用小写单词拼接
+
+序列化建议使用结构体，方便取值
+
+```go
+type Order struct {
+	ID int32 `json:"id"`
+	// 忽略空值
+	Name       string       `json:"name,omitempty"`
+	TotalPrice float64      `json:"total_price"`
+	OrderItems []*OrderItem `json:"order_items"`
+}
+
+type OrderItem struct {
+	ID    int32   `json:"id"`
+	Name  string  `json:"name"`
+	Price float64 `json:"price"`
+}
+```
+
