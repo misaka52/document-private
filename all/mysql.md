@@ -2788,6 +2788,51 @@ https://www.cnblogs.com/barrywxx/p/11532122.html
 1. 从库迁移过程，若更换配置同步完成再切断主从同步关系（不能使用自增主键），更换配置后存在小部分数据新库未及时同步，导致数据不完整；若停止应用程序一小段时间，则导致服务短暂不可用
 2. 双写迁移过程，可以保证数据的完整性。需实现双写，分布式事务，实现困难、影响服务性能、可能导致数据不一致（比如删除时从新老两库删除数据，删除时新库数据不存在，此时可能还未同步）。且双写过程表不能用到自增主键，或自增主键不关键其他表
 
+## 十一、其他
+
+### 1. 数据结构
+
+#### json
+
+```sql
+# 插入
+insert into t_json(txt, tags) values ('{"name":"t3", "value":"v3"}', '[1,2,3]');
+insert into t_json(txt, tags) values  (JSON_OBJECT("name","t4", "value","v4"), JSON_ARRAY(1,2,3,4));
+
+# 查询
+SELECT txt->'$.name',tags->'$[0]',tags->'$[1]' FROM t_json;
+# 查不到
+select * from t_json where txt = '{"name":"t3", "value":"v3"}';
+# 有结果
+select * from t_json where txt = CAST('{"name":"t3", "value":"v3"}' AS JSON);
+
+# 严格区分字段类型
+select * from t_json where txt->'$.id'=1;
+# 不区分字段类型
+select * from t_json where txt->>'$.id'="1";
+
+# 对json字段进行更新
+UPDATE t_json SET txt = JSON_INSERT(txt,'$.id',1) WHERE id = 1;
+UPDATE t_json SET txt = JSON_SET(txt,'$.id',2) WHERE id = 1;
+UPDATE t_json SET txt = JSON_REPLACE(txt,'$.id',3) WHERE id = 1;
+UPDATE t_json SET txt = JSON_REMOVE(txt,'$.id') WHERE id = 1;
+
+# JSONARRAY
+# 给第一个元素添加元素
+UPDATE t_json SET tags = JSON_ARRAY_APPEND(tags, '$[0]' ,2) WHERE id = 1;
+# 在第一个元素前插入一个元素
+UPDATE t_json SET tags = JSON_ARRAY_INSERT(tags, '$[0]' ,0) WHERE id = 1;
+
+# 索引，json不可直接添加索引。可新增一关联列作为索引
+alter table t_json add column txt_id int GENERATED ALWAYS AS (txt->"$.id");
+alter table t_json add index idx_txt_id(txt_id);
+
+# JSON_CONTAINS，只能用于数字
+# 判断同时存在数字1 2 3 4
+SELECT * FROM t_json WHERE JSON_CONTAINS(tags,'[1,2,3,4]');
+SELECT * FROM t_json WHERE JSON_CONTAINS(txt,'1', '$.name');
+```
+
 ## 问题汇总
 
 1. 如何在线修改一个大数据量的表结构，比如增加字段，或添加索引

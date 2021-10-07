@@ -1,0 +1,750 @@
+[
+  {
+    "EcpID": 6986682933427945480,
+    "DeliveryID": 6986682933427961864,
+    "AdName": "0717-蛋蛋面膜-otg7k-定时号",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2656839845021591
+      },
+      "AdvID": 1699445779888136,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2656839845021591,
+        "AdvertiserId": 1699445779888136,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705733236824109,
+    "CampaignFrom": 3,
+    "AdID": 1705733277144125,
+    "PageID": 3492675941329976441,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986682933427978248": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986683168413777923,
+    "DeliveryID": 6986683168413794307,
+    "AdName": "0717-蛋蛋面膜-tqgsz-定时号",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2656839845021591
+      },
+      "AdvID": 1699445779888136,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2656839845021591,
+        "AdvertiserId": 1699445779888136,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705733236824109,
+    "CampaignFrom": 3,
+    "AdID": 1705733279982628,
+    "PageID": 3492675941329976441,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986683168413810691": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986682983759626272,
+    "DeliveryID": 6986683585742766113,
+    "AdName": "0717-蛋蛋面膜-0uyv3-定时号",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2656839845021591
+      },
+      "AdvID": 1699445779888136,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2656839845021591,
+        "AdvertiserId": 1699445779888136,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705733236824109,
+    "CampaignFrom": 3,
+    "AdID": 1705733297357851,
+    "PageID": 3492675941329976441,
+    "OrderStatus": -4,
+    "DeliveryStatus": -1,
+    "CreativeStatus": -1,
+    "EcpCreativeIDMap": {
+      "6986683585742782497": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986682485904097287,
+    "DeliveryID": 6986682485904113671,
+    "AdName": "0717-蛋蛋面膜-ebiqr-定时号",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2656839845021591
+      },
+      "AdvID": 1699445779888136,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2656839845021591,
+        "AdvertiserId": 1699445779888136,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705733236824109,
+    "CampaignFrom": 3,
+    "AdID": 1705733296889879,
+    "PageID": 3492675941329976441,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986682485904130055": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986683492914462731,
+    "DeliveryID": 6986683492914479115,
+    "AdName": "0717-蛋蛋面膜-mtnn7-定时号",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2656839845021591
+      },
+      "AdvID": 1699445779888136,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2656839845021591,
+        "AdvertiserId": 1699445779888136,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705733236824109,
+    "CampaignFrom": 3,
+    "AdID": 1705733291835443,
+    "PageID": 3492675941329976441,
+    "OrderStatus": -4,
+    "DeliveryStatus": -1,
+    "CreativeStatus": -1,
+    "EcpCreativeIDMap": {
+      "6986683492914495499": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986682626509684744,
+    "DeliveryID": 6986682626509701128,
+    "AdName": "0717-蛋蛋面膜-vvcsi-定时号",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2656839845021591
+      },
+      "AdvID": 1699445779888136,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2656839845021591,
+        "AdvertiserId": 1699445779888136,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705733236824109,
+    "CampaignFrom": 3,
+    "AdID": 1705733274384430,
+    "PageID": 3492675941329976441,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986682626509717512": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986683167407194145,
+    "DeliveryID": 6986683167407210529,
+    "AdName": "0717-蛋蛋面膜-83u5v-定时号",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2656839845021591
+      },
+      "AdvID": 1699445779888136,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2656839845021591,
+        "AdvertiserId": 1699445779888136,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705733236824109,
+    "CampaignFrom": 3,
+    "AdID": 1705733289792571,
+    "PageID": 3492675941329976441,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986683167407226913": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986681665116536862,
+    "DeliveryID": 6986681665116553246,
+    "AdName": "0717-蛋蛋面膜-5fdq3-定时号",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2656839845021591
+      },
+      "AdvID": 1699445779888136,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2656839845021591,
+        "AdvertiserId": 1699445779888136,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705733236824109,
+    "CampaignFrom": 3,
+    "AdID": 1705733290013726,
+    "PageID": 3492675941329976441,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986681665116569630": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986683492914528267,
+    "DeliveryID": 6986683492914544651,
+    "AdName": "7.9碧3+6.27碧3-黄酒-利威森",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 1003212151724412
+      },
+      "AdvID": 1700443090883591,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 1003212151724412,
+        "AdvertiserId": 1700443090883591,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "116.22.180.43",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1704888375063587,
+    "CampaignFrom": 3,
+    "AdID": 1705733186970683,
+    "PageID": null,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986683492914561035": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986683053871497223,
+    "DeliveryID": 6986683053871513607,
+    "AdName": "2评论1",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2550467509622541
+      },
+      "AdvID": 1698462494143496,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2550467509622541,
+        "AdvertiserId": 1698462494143496,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "175.44.80.161",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1704279186663448,
+    "CampaignFrom": 3,
+    "AdID": 1705733282860039,
+    "PageID": null,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 3,
+    "EcpCreativeIDMap": {
+      "6986683053871529991": true
+    },
+    "EcpCID2GalaxyCIDMap": {
+      "6986683053871529991": 1705733179962408
+    }
+  },
+  {
+    "EcpID": 6986683067784101902,
+    "DeliveryID": 6986683067784118286,
+    "AdName": "箱包2021-07-20 01:00:06",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 4432850553154349
+      },
+      "AdvID": 1696623166662670,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 4432850553154349,
+        "AdvertiserId": 1696623166662670,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "116.26.191.59",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1703864751078424,
+    "CampaignFrom": 3,
+    "AdID": 1705733291294776,
+    "PageID": 3474699640723907593,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986683583599476749": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986683531103682571,
+    "DeliveryID": 6986683531103698955,
+    "AdName": "0717-蛋蛋面膜-r1tfv-定时号",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2656839845021591
+      },
+      "AdvID": 1699445779888136,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2656839845021591,
+        "AdvertiserId": 1699445779888136,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705733236824109,
+    "CampaignFrom": 3,
+    "AdID": 1705733294562371,
+    "PageID": 3492675941329976441,
+    "OrderStatus": -4,
+    "DeliveryStatus": -1,
+    "CreativeStatus": -1,
+    "EcpCreativeIDMap": {
+      "6986683531103715339": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986683589857378343,
+    "DeliveryID": 6986683589857394727,
+    "AdName": "2021-07-15 旧旧链接 /眼镜/管家_04544",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 4199731893383323
+      },
+      "AdvID": 1698359957414919,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 4199731893383323,
+        "AdvertiserId": 1698359957414919,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705352772151307,
+    "CampaignFrom": 3,
+    "AdID": 1705733266873387,
+    "PageID": 3480421967814098282,
+    "OrderStatus": -4,
+    "DeliveryStatus": -1,
+    "CreativeStatus": -1,
+    "EcpCreativeIDMap": {
+      "6986683589857411111": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986682215111426081,
+    "DeliveryID": 6986682215111442465,
+    "AdName": "7.20爆单组-凯-千雅-咖啡-千万不要喝1",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 4046661943561804
+      },
+      "AdvID": 1697187202775047,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 4046661943561804,
+        "AdvertiserId": 1697187202775047,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "124.90.58.247",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705731930765371,
+    "CampaignFrom": 3,
+    "AdID": 1705733290680331,
+    "PageID": 3490909627439552934,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 3,
+    "EcpCreativeIDMap": {
+      "6986682215111458849": true
+    },
+    "EcpCID2GalaxyCIDMap": {
+      "6986682215111458849": 1705733293674548
+    }
+  },
+  {
+    "EcpID": 6986682074811990019,
+    "DeliveryID": 6986682074812006403,
+    "AdName": "专业计划D08  -2-复制-2021-07-20 00:59:01",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 597786072195160
+      },
+      "AdvID": 1696543324959885,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 597786072195160,
+        "AdvertiserId": 1696543324959885,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "60.180.42.176",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1703673368871979,
+    "CampaignFrom": 3,
+    "AdID": 1705733289075747,
+    "PageID": null,
+    "OrderStatus": -3,
+    "DeliveryStatus": -1,
+    "CreativeStatus": -1,
+    "EcpCreativeIDMap": {
+      "6986683586724233248": true,
+      "6986683586724249632": true,
+      "6986683586724266016": true,
+      "6986683586724282400": true,
+      "6986683586724298784": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986700549555027982,
+    "DeliveryID": 6986700549555044366,
+    "AdName": "0719-丁霞-罗-管家01-3_07978",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 2146692626392733
+      },
+      "AdvID": 1695375373502471,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 2146692626392733,
+        "AdvertiserId": 1695375373502471,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705710342921251,
+    "CampaignFrom": 3,
+    "AdID": 1705738048813064,
+    "PageID": 3463617139066675923,
+    "OrderStatus": -4,
+    "DeliveryStatus": -1,
+    "CreativeStatus": -1,
+    "EcpCreativeIDMap": {
+      "6986700549555060750": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986702025165733900,
+    "DeliveryID": 6986702025165750284,
+    "AdName": "管家 其他_40903",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 59395642492
+      },
+      "AdvID": 1701715574384648,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 59395642492,
+        "AdvertiserId": 1701715574384648,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705321594892331,
+    "CampaignFrom": 3,
+    "AdID": 1705737689737268,
+    "PageID": 3474706600751951317,
+    "OrderStatus": -4,
+    "DeliveryStatus": -1,
+    "CreativeStatus": -1,
+    "EcpCreativeIDMap": {
+      "6986702025165766668": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986697712691429383,
+    "DeliveryID": 6986697712691445767,
+    "AdName": "69标-2021-07-20_短视频_1-复制-2021-07-20 02:13:42",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 1882824953833896
+      },
+      "AdvID": 1701896741676110,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 1882824953833896,
+        "AdvertiserId": 1701896741676110,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "219.136.64.184",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705604567261198,
+    "CampaignFrom": 3,
+    "AdID": 1705738064732183,
+    "PageID": 3491250632810465338,
+    "OrderStatus": -4,
+    "DeliveryStatus": -1,
+    "CreativeStatus": -1,
+    "EcpCreativeIDMap": {
+      "6986697712691462151": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986703110018170891,
+    "DeliveryID": 6986703110018187275,
+    "AdName": "韩伦搓泥膏在线-郑彬-99b",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 3131059932766013
+      },
+      "AdvID": 1705313502110728,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 3131059932766013,
+        "AdvertiserId": 1705313502110728,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1705734619268120,
+    "CampaignFrom": 2,
+    "AdID": 1705738047541291,
+    "PageID": 3492710451207665058,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986703110018203659": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  },
+  {
+    "EcpID": 6986703099482079246,
+    "DeliveryID": 6986703099482095630,
+    "AdName": "撕拉面膜直播-G3-47",
+    "ApiCaller": {
+      "AppID": 1,
+      "User": {
+        "AccountGroupID": 61,
+        "UserID": 1865212204166263
+      },
+      "AdvID": 1702621341442120,
+      "OperatorInfo": {
+        "AccountGroupId": 61,
+        "CoreUserId": 1865212204166263,
+        "AdvertiserId": 1702621341442120,
+        "StaffId": 0,
+        "IsAdmin": false,
+        "SessionKey": "",
+        "SourceIp": "",
+        "SourcePort": 0,
+        "Permissions": "10"
+      },
+      "ServiceConfig": null,
+      "AdvTypeForQC": null
+    },
+    "CampaignID": 1704426954105912,
+    "CampaignFrom": 3,
+    "AdID": 1705738061596750,
+    "PageID": null,
+    "OrderStatus": 1,
+    "DeliveryStatus": 1,
+    "CreativeStatus": 2,
+    "EcpCreativeIDMap": {
+      "6986703099482112014": true
+    },
+    "EcpCID2GalaxyCIDMap": null
+  }
+]

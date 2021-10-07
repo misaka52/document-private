@@ -120,6 +120,35 @@ stash@{1}: WIP on test: 6c4d9fb Merge branch 'test2' into test
 stash@{2}: WIP on test: 6c4d9fb Merge branch 'test2' into test
 ```
 
+#### git rebase
+
+pick：保留该commit（缩写:p）
+
+reword：保留该commit，但我需要修改该commit的注释（缩写:r）
+
+edit：保留该commit, 但我要停下来修改该提交(不仅仅修改注释)（缩写:e）
+
+squash：将该commit和前一个commit合并（缩写:s）
+
+fixup：将该commit和前一个commit合并，但我不要保留该提交的注释信息（缩写:f）
+
+exec：执行shell命令（缩写:x）
+
+drop：我要丢弃该commit（缩写:d）
+
+##### 多节点合并
+
+```sh
+# 按顺序提交了三个commit，c1 c2 c3
+git rebase -i head^3
+# 编辑界面
+pick c1
+s c2
+s c3
+# 合并
+git rebase --continue
+```
+
 
 
 

@@ -43,6 +43,18 @@
       fi
       ```
 
+   6. 添加自动提示历史输入的插件
+
+      ```
+      git clone https://github.com/zsh-users/zsh-autosuggestions $ZSH_CUSTOM/plugins/zsh-autosuggestions
+      vim ~/.zshrc
+      # 加入插件列表
+      plugins=(
+        git
+        zsh-autosuggestions
+      )
+      ```
+
 9. Switchhosts，host切换
 10. draw.io，流程图绘制
 11. postman，接口调用

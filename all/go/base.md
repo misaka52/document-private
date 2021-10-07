@@ -1650,3 +1650,8 @@ Tips:
 
 dumpResponse()
 
+## 其他
+
+- 获取函数全名
+  - runtime.FuncForPC(reflect.ValueOf(handler).Pointer()).Name()
+
