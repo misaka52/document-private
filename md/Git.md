@@ -149,9 +149,13 @@ s c3
 git rebase --continue
 ```
 
+#### git cherry-pick 
 
+https://git-scm.com/docs/git-cherry-pick
 
+截取现有节点至当前分支
 
+git cherry-pick c1 c2 截取c1和c2 两个commit
 
 ### 3、 远程仓库
 

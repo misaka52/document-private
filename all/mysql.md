@@ -2333,9 +2333,27 @@ explain select count(id) from data_large force index(`PRIMARY`);
 
 ### 1. 主从复制
 
+随着数据查询量级的增大，单库可能会到达性能瓶颈，此时可以通过mysql主从复制功能来配置多个从库，进而支持更高量级的查询。主从复制同时也是高可用性、可扩展性、容灾和备份的基础
+
+复制常见的用途
+
+**数据备份**
+
+**负载均衡**：可以将读操作分布到多个服务器上，以支持高量级的查询
+
+**高可用性和故障切换**：当出现服务器单点故障时，其他服务器仍能正常工作不受影响，整体集群受故障的影响更小。同时还能通过一次的策略实现故障切换
+
+**升级测试**：在准备升级mysql之前，可以先升级从库来测试一些查询是否符合预期
+
 #### 1.1 主从复制原理
 
-![image-20210208225308866](../image/image-20210208225308866.png)
+复制有三个步骤
+
+1. 在主库上把数据变更记录到二进制日志（Binary Log）中。在每次事务提前之前，主库就会将数更新事件记录到binlog中，mysql会按照事务提交的顺序记录到binlog中（而非事务执行顺序），binlog记录完之后才会提交事务
+2. 从库将主库上的日志复制到自己的中继日志（Relay Log）中。从库会启动一个I/O线程，并与主库建立一个连接，然后主库上启动一个特殊的 binlog dump线程，它读取binlog然后转发给从库I/O线程，I/O线程将读到的内容写入realy log。每个从库一个binlog dump线程
+3. 从库读取realy log，将其在从库上重放。从库的sql线程读取realy log，并将其放在从库上执行，从而实现数据的同步更新。relay log通常在系统缓存中，开销很低
+
+![image-20210208225308866](../image/xGIlXhKOT5.jpg)
 
 #### 1.2 binlog和relay日志
 
@@ -2412,15 +2430,11 @@ insert into frequency.data_large(a, b) values(2, 'shanghai');
 update user set name = '11' where id = 11;
 ```
 
-#### 1.3 基于主从复制
+#### 1.3 主从复制实战配置
 
-##### 1.3.1 关闭防火墙
+> mac环境配置双实例参考1.4
 
-```sh
-systemctl stop iptables（需要安装iptables服务）
-systemctl stop firewalld（默认）
-systemctl disable firewalld.service（设置开启不启动）
-```
+##### 1.3.1 关闭防火墙（废弃）
 
 ##### 1.3.2 主服务器配置
 
@@ -2429,6 +2443,7 @@ systemctl disable firewalld.service（设置开启不启动）
 Step1：修改my.cnf文件，重启mysql
 
 ```cnf
+[mysqld]
 #启用二进制日志
 log-bin=mysql-bin
 #服务器唯一ID，一般取IP最后一段
@@ -2445,6 +2460,8 @@ mysql>GRANT REPLICATION SLAVE ON *.* TO '从机MySQL用户名'@'从机IP' identi
 
 # 例：GRANT REPLICATION SLAVE ON *.* TO 'slave'@'%' identified by 'slave'
 # %表示任意ip，最后限制指定ip。
+
+ps: mysql8 不需要后面的 dentified by xxx
 ```
 
 > 主要事项，mysql5.7对密码的强度有强制要求。`validate_password_length`: 密码最低长度。`validate_password_policy`: 密码强度级别
@@ -2465,6 +2482,24 @@ Step4: 查询master状态
 
 ```sql
 mysql> show master status;
++---------------+----------+--------------+------------------+-------------------+
+| File          | Position | Binlog_Do_DB | Binlog_Ignore_DB | Executed_Gtid_Set |
++---------------+----------+--------------+------------------+-------------------+
+| binlog.000002 |     3796 |              |                  |                   |
++---------------+----------+--------------+------------------+-------------------+
+
+mysql> show master status\G
+*************************** 3. row ***************************
+     Id: 39
+   User: slave
+   Host: localhost:56979
+     db: NULL
+Command: Binlog Dump
+   Time: 175
+  State: Source has sent all binlog to replica; waiting for more updates
+   Info: NULL
+
+# binlog dump 线程
 ```
 
 ##### 1.3.3 从服务器配置
@@ -2477,9 +2512,15 @@ stop slave;
 
 Step2. 设定需要复制的主服务器配置
 
-```
-> change master to master_host='127.0.0.1',master_port=3307,master_user='slave',master_password='slave',master_log_file='mysql-bin.000001',master_log_pos=749;
+> 若为mysql，则需要在从服务器上执行下面这步，获取主服务器RSA公钥，后续通过它加密密码。（mysql加强了连接的安全性，引入了密钥）
+>
+> mysql -u <slave_user> -p <slave_pwd> -h <主服务器ip> -P<主服务器port> --get-server-public-key
 
+```
+
+> change master to master_host='127.0.0.1',master_port=3307,master_user='slave',master_password='slave',master_log_file='binlog.000002',master_log_pos=0;
+
+# 获取主服务器的文件和位点。在主服务器执行：show binary log
 # master_log_file：master复制的起始文件
 # master_log_pos：master复制的起始文件位置
 ```
@@ -2501,7 +2542,94 @@ Slave_SQL_Running：slave sql运行状态
 当Slave_IO_Running和Slave_SQL_Running都处于Yes状态表示连接成功
 ```
 
-#### 1.4 主从延迟问题
+##### 1.3.4 查看效果
+
+```
+// 主服务器
+create table sync;
+use sync;
+CREATE TABLE `user` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(50) DEFAULT NULL,
+  `age` int DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+insert into user(name, age) values('zhangsan', 19), ('lisi', 20), ('wangwu', 17);
+
+// 切换到从服务器，能看到新数据库和表立马就同步到从库了
+```
+
+
+
+#### 1.4 Mac下配置双实例
+
+参考：https://blog.csdn.net/weixin_41389142/article/details/110230660
+
+**step1 创建my-master.cnf和my-slave.cnf**
+
+```
+[client]
+port = 3307
+socket = /usr/local/mysql-master/tmp/mysql.sock
+
+[mysqld]
+user = root
+port = 3307
+socket = /usr/local/mysql-master/tmp/mysql.sock
+basedir = /usr/local/mysql
+datadir = /usr/local/mysql-master/data
+# 用于主从复制，没个机器不一样。这里随意取
+server-id = 1
+# 开启binlog
+log_bin = mysql-bin
+
+[mysqld_safe]
+log-error = /usr/local/mysql-master/data/mysqld.local.err
+pid-file = /usr/local/mysql-master/data/mysqld.local.pid
+```
+
+> my-slave.cnf 类似
+
+**Step2 创建文件夹**
+
+```shell
+sudo mkdir -p /usr/local/mysql-master/{data,tmp}
+sudo chown -R mysql:mysql /usr/local/mysql-master
+
+ps -ef|grep mysql # 获取原mysql的位置
+# 复制整个mysql文件到新文件夹
+sudo cp -pr /usr/local/mysql/* /usr/local/mysql-master
+```
+
+**step3 初始化**
+
+```
+sudo mysqld --defaults-file=/etc/my-master.cnf --initialize
+
+[显示]
+返回默认密码:wna*LOC7A6YC
+[Server] A temporary password is generated for root@localhost: wna*LOC7A6YC
+```
+
+**step4 数据库启停**
+
+```
+sudo mysqld_safe --defaults-file=/etc/my-master.cnf &
+mysqladmin -uroot -p -S /usr/local/mysql-master/tmp/mysql.sock shutdown
+```
+
+**Step5 登录**
+
+```
+# 登录
+mysql --defaults-file=/etc/my-master.cnf -uroot -p123456 -h127.0.0.1 -Pxxxx
+# 改密码
+<mysql> ALTER USER USER() IDENTIFIED BY '123456';
+# 查看端口，确认下是否启动了对应的实例
+<mysql> show variables like 'port';
+```
+
+#### 1.5 主从延迟问题
 
 主服务器将更新binlog文件，从服务器连接主服务器，同步binlog文件，写入自己的relaylog中，后台异步读取relaylog并执行，已达到主从复制的效果
 
@@ -2539,78 +2667,7 @@ Slave_SQL_Running：slave sql运行状态
 2. 直接禁用slave的binlog日志
 3. innodb_flush_log_at_trx_commit配置2，默认异步刷盘，不要求高数据安全
 
-#### 1.5 Mac下配置双实例
 
-Step1：创建配置文件
-
-```txt
-[mysqld_multi]
-#mysqld     = /usr/local/mysql/bin/mysqld_safe
-mysqladmin = /usr/local/mysql/bin/mysqladmin
-user       = root
-password   = 123456
-
-
-
-[mysqld3307]
-server-id=3307
-port=3307
-log-bin=mysql-bin
-
-log-error=/Users/ysc/Softwares/mysql/mysql-cluster/master/mysqld.log
-tmpdir=/Users/ysc/Softwares/mysql/mysql-cluster/master
-slow_query_log=on
-slow_query_log_file =/Users/ysc/Softwares/mysql/mysql-cluster/master/mysql-slow.log
-long_query_time=1
-
-socket=/Users/ysc/Softwares/mysql/mysql-cluster/master/mysql_3307.sock
-pid-file=/Users/ysc/Softwares/mysql/mysql-cluster/master/mysql.pid
-
-basedir=/Users/ysc/Softwares/mysql/mysql-cluster/master
-datadir=/Users/ysc/Softwares/mysql/mysql-cluster/master/data
-
-[mysqld3308]
-server-id=3308
-port=3308
-log-bin=mysql-bin
-
-log-error=/Users/ysc/Softwares/mysql/mysql-cluster/slave/mysqld.log
-tmpdir=/Users/ysc/Softwares/mysql/mysql-cluster/slave
-
-slow_query_log=on
-slow_query_log_file =/Users/ysc/Softwares/mysql/mysql-cluster/slave/mysql-slow.log
-long_query_time=1
-
-socket=/Users/ysc/Softwares/mysql/mysql-cluster/slave/mysql_3308.sock
-pid-file=/Users/ysc/Softwares/mysql/mysql-cluster/slave/mysql.pid
-
-
-basedir=/Users/ysc/Softwares/mysql/mysql-cluster/slave
-datadir=/Users/ysc/Softwares/mysql/mysql-cluster/slave/data
-
-read_only=1
-
-
-[mysqld]
-character_set_server=utf8
-```
-
-step2:  创建主从文件目录 master, slave 
-
-Step3：通过mysql_multi启动双实例
-
-```sh
-mysqld_multi --defaults-file=cluster.cnf start
-# report查看运行状态
-```
-
-Step4: 启动mysql
-
-```sh
-sudo /usr/local/mysql/support-files/mysql.server start
-```
-
-Step5: 按照1.3 配置主服务器和从服务器
 
 ### 2. 集群搭建之读写分离
 

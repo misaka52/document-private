@@ -33,6 +33,17 @@ go get -v golang.org/x/tools/cmd/goimports
 
 #### GoLand
 
+## GO优势
+
+https://www.zhihu.com/question/21409296/answer/1040884859
+
+1. 轻量：内存占用少、易上手
+2. 适合并发开发：协程控制并发，通过少量线程控制大量协程，上下文切换代价小
+
+**推荐书籍**
+
+https://www.zhihu.com/question/30461290
+
 ## 基础语法
 
 ### 1. 变量定义
@@ -1655,7 +1666,7 @@ dumpResponse()
 
 - 获取函数全名
   - runtime.FuncForPC(reflect.ValueOf(handler).Pointer()).Name()
-=======
+  =======
 ### json
 
 包：encoding/json
@@ -1679,5 +1690,26 @@ type OrderItem struct {
 	Price float64 `json:"price"`
 }
 ```
->>>>>>> 94bf179be16ed1132793f5ec3dfa7582fcd96411
+pprof
 
+```shell
+// 1.查看堆内存
+go tool pprof http://localhost:6060/debug/pprof/heap
+curl -sK -v http://localhost:6060/debug/pprof/heap > heap.out
+go tool pprof -http=:8080 heap.out
+
+// 2. 查看30s cpu
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
+
+// 3.查看goruntine阻塞
+go tool pprof http://localhost:6060/debug/pprof/block
+
+// 4. 查看5s内执行路径
+go tool pprof http://localhost:6060/debug/pprof/trace?seconds=5
+
+// 5.互斥持有者的堆栈跟踪
+go tool pprof http://localhost:6060/debug/pprof/mutex
+
+```
+
+ 
