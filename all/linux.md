@@ -668,7 +668,7 @@ locate .sh
 # 截取第一个参数
 awk '{print $1}'
 # 按照逗号分割
-awk -F, '{print $1}'
+awk -F , '{print $1}'
 # 首先按照空格分割，再按照逗号分割
 awk -F '[ ,]' '{print $1}'
 # 设置变量 awk -v 变量名
@@ -687,4 +687,21 @@ awk 'BEGIN {
   printf "The arc tangent for (x=%f, y=%f) is %f degrees\n", x, y, result
 }'
 ```
+
+### sort
+
+排序
+
+### uniq
+
+对数据去重
+
+> 一般先sort再用uniq，直接用uniq不知道为啥不能真正的去重！！！
+
+- -c：去重后统计数量
+- -d：仅显示重复行
+
+### wc
+
+- wc -l 统计总行数
 

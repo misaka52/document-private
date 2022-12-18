@@ -34,9 +34,13 @@
 
 ### 2.1 架构设计
 
+<img src="../../image/rmq main.png" alt="image-20201219191727861" style="zoom:33%;" />
+
 消息生产者（Producer）发送消息给消费服务器（broker），消息服务器负责消息存储和转发，消息消费者通过消费服务器主动推送消息或主动拉取消息两种方式订阅消息
 
-其中，broker启动时向所有NameServer注册，建立长连接，每隔30s检查broker是否存活。producer通过nameserver获取broker列表信息，通过负载均衡算法选择一个broker发送消息。nameServer节点间无同步，且broker宕机后，nameServer会将其移除，但不会通知producer。
+1. NameServer与每台Broker保持长连接，并每隔10s检查broker是否存活，若120s内没收到心跳包，则从路由列表中将其移除，但路由变化并不会通知Producer（为了降低NameServer实现的复杂性）
+1. broker每隔30s给NS发送心跳，配置信息
+1. 每隔NS都保存了全量broker信息，且彼此没有通信关系， 无状态
 
 ### 2.3 NameServer 路由注册、故障剔除
 
@@ -85,6 +89,11 @@ RocketMQ发现路由不是实时的，当NameServer路由发生改变时，并�
 > 2. 在发送消息得到broker返回信息时，结果不为SEND_OK（其他错误刷盘超时、同步slave超时、slave不可用），且retryAnotherBrokerWhenNotStoreOK（默认false）为true时，自动重试。仅在SYNC模式下重试，ASYNC和ONEWAY模式下不重试
 > 3. retryTimesWhenSendFailed：默认2。失败后重试次数，即最多发送retryTimesWhenSendFailed+1次
 
+TODO
+
+1. RouteInfoManager#unRegisterBroker 研究master broker不存活系统如何应对
+2. RouteInfoManager#filterServerTable作用
+
 ## 三、RocketMQ消息发送
 
 ### 3.1 漫谈发送
@@ -128,15 +137,15 @@ clientId={clientIp}@{instance}[@unitName]
 
 #### 3.4.3 选择消息队列
 
-**异常重试机制，默认sendLatencyFaultEnable=false。默认不启用 broker故障延迟机制**
+异常broker规避：当发送消息失败后重试，下次进行消息队列选择会自动避开上次的broker。但是可能出现选择到之前失败的broker，可能浪费一定性能
 
-当发送消息失败后重试，下次进行消息队列选择会自动避开上次的broker。但是可能出现选择到之前失败的broker，浪费一定性能
+**开启broker故障延迟机制（sendLatencyFaultEnable=true），较悲观的做法，一旦发送失败或耗时偏高，则设置broker短暂不可用**
 
-**开启broker故障延迟机制**
+当消息发送完成后，会更新延迟记录表，发送耗时长的broker设置不可用的时间也越长，不管本次发送成功或失败
 
-当发送消息失败时，broker被设置成短暂不可用，不会被选择到
+当发送消息失败时，若为broker相关异常，broker被设置成30s不可用
 
-当消息发送完成后，会更新延迟记录表，发送耗时长的broker设置不可用的时间也越长
+> TODO：若为顺序消息，消息分到不同的broker，能保证有序性吗？
 
 #### 3.4.4 消息发送
 
@@ -158,6 +167,8 @@ clientId={clientIp}@{instance}[@unitName]
 4. waitStoreMsgOK相同
 
 > 疑问，解压时对批量消息做特殊处理？有
+>
+> 是否支持顺序消息，若支持能保持批量有序吗？
 
 ### Producer属性
 #### DefaultMQPushConsumerImpl
